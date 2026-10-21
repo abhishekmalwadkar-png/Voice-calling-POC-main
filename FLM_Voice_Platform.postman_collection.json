@@ -1,0 +1,1051 @@
+{
+  "info": {
+    "name": "FLM Voice Call Platform",
+    "description": "FLM Helpdesk voice call platform (Twilio). api_key is pre-filled from the server's .env - do not share this file outside the team. base_url = the server on port 80. Every /api/* request sends X-API-Key through the collection auth. Requests 1, 3 and the follow-up place REAL calls.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "auth": {
+    "type": "apikey",
+    "apikey": [
+      {
+        "key": "key",
+        "value": "X-API-Key",
+        "type": "string"
+      },
+      {
+        "key": "value",
+        "value": "{{api_key}}",
+        "type": "string"
+      },
+      {
+        "key": "in",
+        "value": "header",
+        "type": "string"
+      }
+    ]
+  },
+  "variable": [
+    {
+      "key": "base_url",
+      "value": "https://caught-purpose-complete-parks.trycloudflare.com"
+    },
+    {
+      "key": "lan_url",
+      "value": "http://172.11.1.15",
+      "description": "Company-network address; copy into base_url to use it instead"
+    },
+    {
+      "key": "api_key",
+      "value": "YOUR_API_KEY"
+    },
+    {
+      "key": "ticket_id",
+      "value": "INC0012345"
+    },
+    {
+      "key": "assignment_id",
+      "value": "CASE-1001-v1"
+    },
+    {
+      "key": "new_assignment_id",
+      "value": "CASE-1001-v2"
+    },
+    {
+      "key": "technician_mobile",
+      "value": "+919112381254"
+    },
+    {
+      "key": "new_technician_mobile",
+      "value": "+919022190241"
+    },
+    {
+      "key": "team_leader_mobile",
+      "value": "+919022190241"
+    },
+    {
+      "key": "manager_mobile",
+      "value": "+919112381254"
+    },
+    {
+      "key": "callback_url",
+      "value": "http://localhost:5058/visit-result"
+    },
+    {
+      "key": "legacy_ticket_id",
+      "value": "INC0099050"
+    }
+  ],
+  "item": [
+    {
+      "name": "1. Events (POST /api/events)",
+      "item": [
+        {
+          "name": "1. ASSIGNMENT_CREATED - call technician",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/events",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "events"
+              ]
+            },
+            "description": "Calls the technician (2 attempts). Press ack_digit to accept, 9 to reject. Team leader / manager are called on escalation; remove them from recipients to skip escalation calls. Expected: 202 accepted.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"event_id\": \"{{ticket_id}}-ASSIGN-{{$timestamp}}\",\n  \"event_type\": \"ASSIGNMENT_CREATED\",\n  \"event_time\": \"{{$isoTimestamp}}\",\n  \"version\": \"{{$timestamp}}\",\n  \"ticket\": {\n    \"ticket_id\": \"{{ticket_id}}\",\n    \"alarm_id\": \"ALM-77\",\n    \"assignment_id\": \"{{assignment_id}}\",\n    \"site_number\": \"2040\",\n    \"site_name\": \"Olaya Branch, Riyadh\",\n    \"severity\": \"High\",\n    \"status\": \"Assigned\",\n    \"alarm_status\": \"Active\",\n    \"description\": \"ATM cash dispenser fault\"\n  },\n  \"ack_digit\": \"1\",\n  \"callback_url\": \"{{callback_url}}\",\n  \"recipients\": [\n    {\n      \"role\": \"technician\",\n      \"name\": \"Ahmed\",\n      \"mobile\": \"{{technician_mobile}}\",\n      \"language\": \"en\"\n    },\n    {\n      \"role\": \"team_leader\",\n      \"name\": \"Imran\",\n      \"mobile\": \"{{team_leader_mobile}}\",\n      \"language\": \"ur\"\n    },\n    {\n      \"role\": \"manager\",\n      \"name\": \"Sara\",\n      \"mobile\": \"{{manager_mobile}}\",\n      \"language\": \"en\"\n    }\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "1b. ASSIGNMENT_CREATED + WAIT for technician answer (single API)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/events?wait=true&until=technician&timeout=90",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "events"
+              ],
+              "query": [
+                {
+                  "key": "wait",
+                  "value": "true"
+                },
+                {
+                  "key": "until",
+                  "value": "technician"
+                },
+                {
+                  "key": "timeout",
+                  "value": "90"
+                }
+              ]
+            },
+            "description": "Same as request 1, but the response waits until the technician answers: call_result = accepted | rejected | no_response | cancelled (HTTP 200), or pending if timeout seconds pass first (HTTP 202, the calls keep running). until=final waits for the escalation calls too. Set your client timeout above the timeout value (technician part takes up to ~3 min: 25 s ring + 60 s gap + 2nd call).",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"event_id\": \"{{ticket_id}}-ASSIGN-{{$timestamp}}\",\n  \"event_type\": \"ASSIGNMENT_CREATED\",\n  \"event_time\": \"{{$isoTimestamp}}\",\n  \"version\": \"{{$timestamp}}\",\n  \"ticket\": {\n    \"ticket_id\": \"{{ticket_id}}\",\n    \"alarm_id\": \"ALM-77\",\n    \"assignment_id\": \"{{assignment_id}}\",\n    \"site_number\": \"2040\",\n    \"site_name\": \"Olaya Branch, Riyadh\",\n    \"severity\": \"High\",\n    \"status\": \"Assigned\",\n    \"alarm_status\": \"Active\",\n    \"description\": \"ATM cash dispenser fault\"\n  },\n  \"ack_digit\": \"1\",\n  \"callback_url\": \"{{callback_url}}\",\n  \"recipients\": [\n    {\n      \"role\": \"technician\",\n      \"name\": \"Ahmed\",\n      \"mobile\": \"{{technician_mobile}}\",\n      \"language\": \"en\"\n    },\n    {\n      \"role\": \"team_leader\",\n      \"name\": \"Imran\",\n      \"mobile\": \"{{team_leader_mobile}}\",\n      \"language\": \"ur\"\n    },\n    {\n      \"role\": \"manager\",\n      \"name\": \"Sara\",\n      \"mobile\": \"{{manager_mobile}}\",\n      \"language\": \"en\"\n    }\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "2. Duplicate check - send twice (2nd = duplicate)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/events",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "events"
+              ]
+            },
+            "description": "First send: 202 accepted. Second send with the same event_id: 200 duplicate, nothing happens.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"event_id\": \"{{ticket_id}}-DUPLICATE-TEST\",\n  \"event_type\": \"TICKET_UPDATED\",\n  \"ticket\": {\n    \"ticket_id\": \"{{ticket_id}}\"\n  }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "3. REASSIGNED - new technician",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/events",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "events"
+              ]
+            },
+            "description": "Ends any live call and pending calls for the old assignment, then calls the new technician.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"event_id\": \"{{ticket_id}}-REASSIGN-{{$timestamp}}\",\n  \"event_type\": \"REASSIGNED\",\n  \"event_time\": \"{{$isoTimestamp}}\",\n  \"version\": \"{{$timestamp}}\",\n  \"ticket\": {\n    \"ticket_id\": \"{{ticket_id}}\",\n    \"assignment_id\": \"{{new_assignment_id}}\"\n  },\n  \"recipients\": [\n    {\n      \"role\": \"technician\",\n      \"name\": \"Omar\",\n      \"mobile\": \"{{new_technician_mobile}}\",\n      \"language\": \"ar\"\n    }\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "4. ASSIGNMENT_ACCEPTED - accepted elsewhere",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/events",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "events"
+              ]
+            },
+            "description": "Stops technician/escalation calls and marks the ticket acknowledged (via nextask).",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"event_id\": \"{{ticket_id}}-ACCEPTED-{{$timestamp}}\",\n  \"event_type\": \"ASSIGNMENT_ACCEPTED\",\n  \"event_time\": \"{{$isoTimestamp}}\",\n  \"version\": \"{{$timestamp}}\",\n  \"ticket\": {\n    \"ticket_id\": \"{{ticket_id}}\"\n  }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "5. ASSIGNMENT_REJECTED - rejected elsewhere",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/events",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "events"
+              ]
+            },
+            "description": "Starts escalation straight away (only while the technician is still being called).",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"event_id\": \"{{ticket_id}}-REJECTED-{{$timestamp}}\",\n  \"event_type\": \"ASSIGNMENT_REJECTED\",\n  \"event_time\": \"{{$isoTimestamp}}\",\n  \"version\": \"{{$timestamp}}\",\n  \"ticket\": {\n    \"ticket_id\": \"{{ticket_id}}\"\n  }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "6. OPERATIONAL_STATUS - Arrived",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/events",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "events"
+              ]
+            },
+            "description": "Departed / Arrived / Started make the 15-minute reminder unnecessary.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"event_id\": \"{{ticket_id}}-ARRIVED-{{$timestamp}}\",\n  \"event_type\": \"OPERATIONAL_STATUS\",\n  \"event_time\": \"{{$isoTimestamp}}\",\n  \"version\": \"{{$timestamp}}\",\n  \"ticket\": {\n    \"ticket_id\": \"{{ticket_id}}\",\n    \"operational_status\": \"Arrived\"\n  }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "7. ALARM_STATUS - Cleared",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/events",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "events"
+              ]
+            },
+            "description": "Cancels pending calls and escalation for the ticket.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"event_id\": \"{{ticket_id}}-ALARM-CLEARED-{{$timestamp}}\",\n  \"event_type\": \"ALARM_STATUS\",\n  \"event_time\": \"{{$isoTimestamp}}\",\n  \"version\": \"{{$timestamp}}\",\n  \"ticket\": {\n    \"ticket_id\": \"{{ticket_id}}\",\n    \"alarm_status\": \"Cleared\"\n  }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "8. SEVERITY_CHANGED - Emergency",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/events",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "events"
+              ]
+            },
+            "description": "State update only (no call).",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"event_id\": \"{{ticket_id}}-SEVERITY-{{$timestamp}}\",\n  \"event_type\": \"SEVERITY_CHANGED\",\n  \"event_time\": \"{{$isoTimestamp}}\",\n  \"version\": \"{{$timestamp}}\",\n  \"ticket\": {\n    \"ticket_id\": \"{{ticket_id}}\",\n    \"severity\": \"Emergency\"\n  }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "9. TICKET_UPDATED - any field",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/events",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "events"
+              ]
+            },
+            "description": "State update only.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"event_id\": \"{{ticket_id}}-UPDATED-{{$timestamp}}\",\n  \"event_type\": \"TICKET_UPDATED\",\n  \"event_time\": \"{{$isoTimestamp}}\",\n  \"version\": \"{{$timestamp}}\",\n  \"ticket\": {\n    \"ticket_id\": \"{{ticket_id}}\",\n    \"site_name\": \"Olaya Branch, Riyadh\"\n  }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "10. TICKET_CLOSED - stop everything",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/events",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "events"
+              ]
+            },
+            "description": "Marks the ticket Closed and cancels every pending call.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"event_id\": \"{{ticket_id}}-CLOSED-{{$timestamp}}\",\n  \"event_type\": \"TICKET_CLOSED\",\n  \"event_time\": \"{{$isoTimestamp}}\",\n  \"version\": \"{{$timestamp}}\",\n  \"ticket\": {\n    \"ticket_id\": \"{{ticket_id}}\"\n  }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "2. Follow-up",
+      "item": [
+        {
+          "name": "Follow-up after 15 min (reminder call if needed)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/tickets/{{ticket_id}}/followup",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "tickets",
+                "{{ticket_id}}",
+                "followup"
+              ]
+            },
+            "description": "202 reminder_call_placed · 200 not_needed (closed / reassigned / status recorded / alarm cleared) · 409 not acknowledged yet · 404 unknown ticket.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"assignment_id\": \"{{assignment_id}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Follow-up + WAIT for reminder call result",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/tickets/{{ticket_id}}/followup?wait=true&timeout=90",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "tickets",
+                "{{ticket_id}}",
+                "followup"
+              ],
+              "query": [
+                {
+                  "key": "wait",
+                  "value": "true"
+                },
+                {
+                  "key": "timeout",
+                  "value": "90"
+                }
+              ]
+            },
+            "description": "Places the reminder call (if still needed) and waits until it ends: reminder_result = reminder_delivered (answered) | not_picked_up | busy_or_declined | ..., answered = true/false. HTTP 200 when the call ended, 202 + pending if timeout passed first. not_needed / 409 / 404 return at once.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"assignment_id\": \"{{assignment_id}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "3. Ticket status",
+      "item": [
+        {
+          "name": "Ticket state + all calls",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/tickets/{{ticket_id}}",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "tickets",
+                "{{ticket_id}}"
+              ]
+            },
+            "description": ""
+          }
+        },
+        {
+          "name": "Ticket timeline (audit)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/tickets/{{ticket_id}}/timeline",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "tickets",
+                "{{ticket_id}}",
+                "timeline"
+              ]
+            },
+            "description": ""
+          }
+        },
+        {
+          "name": "All tickets",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/tickets?limit=50",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "tickets"
+              ],
+              "query": [
+                {
+                  "key": "limit",
+                  "value": "50"
+                }
+              ]
+            },
+            "description": ""
+          }
+        },
+        {
+          "name": "Acknowledged tickets",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/tickets?state=ACKNOWLEDGED",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "tickets"
+              ],
+              "query": [
+                {
+                  "key": "state",
+                  "value": "ACKNOWLEDGED"
+                }
+              ]
+            },
+            "description": ""
+          }
+        }
+      ]
+    },
+    {
+      "name": "4. Audit and search",
+      "item": [
+        {
+          "name": "Calls of this ticket",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/calls?ticket_id={{ticket_id}}",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "calls"
+              ],
+              "query": [
+                {
+                  "key": "ticket_id",
+                  "value": "{{ticket_id}}"
+                }
+              ]
+            },
+            "description": ""
+          }
+        },
+        {
+          "name": "Calls - search (role / outcome / language)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/calls?role=technician&outcome=not_picked_up&language=en&limit=100",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "calls"
+              ],
+              "query": [
+                {
+                  "key": "role",
+                  "value": "technician"
+                },
+                {
+                  "key": "outcome",
+                  "value": "not_picked_up"
+                },
+                {
+                  "key": "language",
+                  "value": "en"
+                },
+                {
+                  "key": "limit",
+                  "value": "100"
+                }
+              ]
+            },
+            "description": ""
+          }
+        },
+        {
+          "name": "Events of this ticket",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/events?ticket_id={{ticket_id}}",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "events"
+              ],
+              "query": [
+                {
+                  "key": "ticket_id",
+                  "value": "{{ticket_id}}"
+                }
+              ]
+            },
+            "description": ""
+          }
+        },
+        {
+          "name": "Stale events",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/events?result=stale",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "events"
+              ],
+              "query": [
+                {
+                  "key": "result",
+                  "value": "stale"
+                }
+              ]
+            },
+            "description": ""
+          }
+        },
+        {
+          "name": "Unresolved escalations",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/escalations?status=unresolved",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "escalations"
+              ],
+              "query": [
+                {
+                  "key": "status",
+                  "value": "unresolved"
+                }
+              ]
+            },
+            "description": ""
+          }
+        },
+        {
+          "name": "All escalations",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/escalations?status=all",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "escalations"
+              ],
+              "query": [
+                {
+                  "key": "status",
+                  "value": "all"
+                }
+              ]
+            },
+            "description": ""
+          }
+        },
+        {
+          "name": "Exceptions",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/exceptions",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "exceptions"
+              ]
+            },
+            "description": ""
+          }
+        },
+        {
+          "name": "Export calls (CSV)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/audit/export?type=calls&format=csv",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "audit",
+                "export"
+              ],
+              "query": [
+                {
+                  "key": "type",
+                  "value": "calls"
+                },
+                {
+                  "key": "format",
+                  "value": "csv"
+                }
+              ]
+            },
+            "description": "Use 'Send and Download' to save the file."
+          }
+        },
+        {
+          "name": "Export events (JSON)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/audit/export?type=events&format=json",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "audit",
+                "export"
+              ],
+              "query": [
+                {
+                  "key": "type",
+                  "value": "events"
+                },
+                {
+                  "key": "format",
+                  "value": "json"
+                }
+              ]
+            },
+            "description": ""
+          }
+        },
+        {
+          "name": "Export ticket timeline (CSV)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/audit/export?type=timeline&ticket_id={{ticket_id}}&format=csv",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "audit",
+                "export"
+              ],
+              "query": [
+                {
+                  "key": "type",
+                  "value": "timeline"
+                },
+                {
+                  "key": "ticket_id",
+                  "value": "{{ticket_id}}"
+                },
+                {
+                  "key": "format",
+                  "value": "csv"
+                }
+              ]
+            },
+            "description": ""
+          }
+        },
+        {
+          "name": "Pending timers",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/timers",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "timers"
+              ]
+            },
+            "description": ""
+          }
+        },
+        {
+          "name": "Config (no secrets)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/config",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "config"
+              ]
+            },
+            "description": ""
+          }
+        },
+        {
+          "name": "Health (no key)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/health",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "health"
+              ]
+            },
+            "description": "",
+            "auth": {
+              "type": "noauth"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "5. Old single-call API",
+      "item": [
+        {
+          "name": "POST /api/call - single call (old API)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/call",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "call"
+              ]
+            },
+            "description": "Earlier API, kept for compatibility. Plays the language menu; 1 = accept, 9 = reject.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"alert_id\": \"ALM-80\",\n  \"ticket_id\": \"{{legacy_ticket_id}}\",\n  \"phone_number\": \"{{technician_mobile}}\",\n  \"technician_name\": \"Ahmed Khan\",\n  \"site_details\": \"Site 2040, Olaya Branch, Riyadh\",\n  \"technician_language\": \"en\",\n  \"team_leader_number\": \"{{team_leader_mobile}}\",\n  \"team_leader_name\": \"Imran\",\n  \"team_leader_language\": \"ur\",\n  \"manager_number\": \"{{manager_mobile}}\",\n  \"manager_name\": \"Sara\",\n  \"manager_language\": \"ar\",\n  \"callback_url\": \"{{callback_url}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "POST /api/call?wait=true - single call, answer in response",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/call?wait=true&timeout=90",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "call"
+              ],
+              "query": [
+                {
+                  "key": "wait",
+                  "value": "true"
+                },
+                {
+                  "key": "timeout",
+                  "value": "90"
+                }
+              ]
+            },
+            "description": "Waits for the technician: call_result + visit_status (accepted / rejected / no_response) in the same response.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"alert_id\": \"ALM-80\",\n  \"ticket_id\": \"{{legacy_ticket_id}}\",\n  \"phone_number\": \"{{technician_mobile}}\",\n  \"technician_name\": \"Ahmed Khan\",\n  \"site_details\": \"Site 2040, Olaya Branch, Riyadh\",\n  \"technician_language\": \"en\",\n  \"team_leader_number\": \"{{team_leader_mobile}}\",\n  \"team_leader_name\": \"Imran\",\n  \"team_leader_language\": \"ur\",\n  \"manager_number\": \"{{manager_mobile}}\",\n  \"manager_name\": \"Sara\",\n  \"manager_language\": \"ar\",\n  \"callback_url\": \"{{callback_url}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "GET /api/call/{id} - result (old API)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/call/{{legacy_ticket_id}}",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "call",
+                "{{legacy_ticket_id}}"
+              ]
+            },
+            "description": ""
+          }
+        }
+      ]
+    }
+  ]
+}
