@@ -27,6 +27,8 @@ def send_whatsapp(phone_number, message, timeout=15):
     push_url = CFG.get("ae_push_url") or "https://dev-p280.ac2.automationedge.com/api/push-notifications"
     bot_id = CFG.get("ae_bot_id") or "717940961400025"
     service_url = CFG.get("ae_service_url") or "http://localhost:3978/whatsapp"
+    if "automationedge.com" in service_url:
+        service_url = "http://localhost:3978/whatsapp"
 
     clean_number = "".join(str(phone_number).split()).lstrip("+")
     user_ids = [clean_number]
