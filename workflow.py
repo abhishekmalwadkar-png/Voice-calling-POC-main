@@ -498,7 +498,7 @@ def _place_call(t, role, attempt, workflow):
                     f"Severity: {t.get('severity') or 'Critical'}\n"
                     f"Issue: {t.get('description') or 'N/A'}\n"
                     f"Technician: {tech_name} (Unanswered after technician calls)\n\n"
-                    f"A voice call attempt #{attempt} has been placed to your mobile. Please review and take action."
+                    f"Please review and take action."
                 )
                 try:
                     status_code, resp_body = ae_whatsapp.send_whatsapp(target_mobile, msg)
