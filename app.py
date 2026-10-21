@@ -26,10 +26,19 @@ from config import CFG
 
 # --------------------------------------------------------------------------- legacy single-call API (/api/call)
 def legacy_call(form):
-    """POST /api/call {alert_id, ticket_id, phone_number, site_details, team_leader_number?, manager_number?,
-    language?, technician_language?, team_leader_language?, manager_language?, technician_name?,
-    team_leader_name?, manager_name?, callback_url?, description?, ack_digit?} -> mapped onto an ASSIGNMENT_CREATED event. language is the default for everyone; the
-    per-person *_language fields override it (en, ar, ur, hi, or ask = menu)."""
+    """POST /api/call: supports both flat format {alert_id, ticket_id, phone_number, site_details...}
+    and nested event format {event_id, event_type, ticket, recipients...}.
+    """
+    if not isinstance(form, dict):
+        raise workflow.EventError("body must be a JSON object")
+
+    if form.get("event_type") or (isinstance(form.get("ticket"), dict) and "recipients" in form):
+        code, body = workflow.ingest_event(form)
+        tid = form.get("ticket_id") or (form.get("ticket") or {}).get("ticket_id")
+        if tid and code == 202:
+            return code, dict(legacy_view(str(tid).upper()) or body, status_url=f"/api/call/{tid}")
+        return code, body
+
     missing = [k for k in ("alert_id", "ticket_id", "phone_number", "site_details") if not str(form.get(k) or "").strip()]
     if missing:
         raise workflow.EventError(f"missing required field(s): {', '.join(missing)}")
