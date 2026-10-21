@@ -27,16 +27,16 @@
   "variable": [
     {
       "key": "base_url",
-      "value": "https://caught-purpose-complete-parks.trycloudflare.com"
+      "value": "http://localhost:5000"
     },
     {
       "key": "lan_url",
-      "value": "http://172.11.1.15",
-      "description": "Company-network address; copy into base_url to use it instead"
+      "value": "https://sue-sells-mode-yoga.trycloudflare.com",
+      "description": "Public Cloudflare tunnel address"
     },
     {
       "key": "api_key",
-      "value": "YOUR_API_KEY"
+      "value": "5adJjBRSydznz8qO8e6Du128rWb5djvd"
     },
     {
       "key": "ticket_id",
@@ -52,23 +52,23 @@
     },
     {
       "key": "technician_mobile",
-      "value": "+919112381254"
+      "value": "+919923751925"
     },
     {
       "key": "new_technician_mobile",
-      "value": "+919022190241"
+      "value": "+919923751925"
     },
     {
       "key": "team_leader_mobile",
-      "value": "+919022190241"
+      "value": "+919923751925"
     },
     {
       "key": "manager_mobile",
-      "value": "+919112381254"
+      "value": "+919923751925"
     },
     {
       "key": "callback_url",
-      "value": "http://localhost:5058/visit-result"
+      "value": "https://mood-founder-lucia-designs.trycloudflare.com/visit-result"
     },
     {
       "key": "legacy_ticket_id",
