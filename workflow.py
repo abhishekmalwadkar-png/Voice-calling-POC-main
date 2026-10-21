@@ -13,6 +13,7 @@ import time
 import urllib.error
 import urllib.request
 
+import ae_whatsapp
 import texts
 import twilio_client
 from config import CFG
@@ -485,6 +486,25 @@ def _place_call(t, role, attempt, workflow):
         sid = twilio_client.create_call(rec["mobile"], cid)
         update_call(cid, call_sid=sid, status="queued")
         audit(tid, "call_placed", f"{role} call #{attempt} ({workflow}) to {rec['mobile']} sid {sid}", call_id=cid)
+        if role == "manager" and rec.get("mobile"):
+            def _send_manager_wa(mgr_mobile, call_cid):
+                tech_name = (t.get("recipients", {}).get("technician") or {}).get("name") or "Technician"
+                msg = (
+                    f"FLM Escalation Alert (Manager)\n\n"
+                    f"Ticket: {tid}\n"
+                    f"Site: {t.get('site_name') or 'N/A'}\n"
+                    f"Severity: {t.get('severity') or 'Critical'}\n"
+                    f"Issue: {t.get('description') or 'N/A'}\n"
+                    f"Technician: {tech_name} (Unanswered after technician calls)\n\n"
+                    f"A voice call attempt #{attempt} has been placed to your mobile. Please review and take action."
+                )
+                try:
+                    ae_whatsapp.send_whatsapp(mgr_mobile, msg)
+                    audit(tid, "whatsapp_sent", f"Manager escalation WhatsApp message sent to {mgr_mobile}", call_id=call_cid)
+                except Exception as ex:  # noqa: BLE001
+                    audit(tid, "whatsapp_error", f"Could not send WhatsApp message to Manager: {ex}", call_id=call_cid)
+
+            threading.Thread(target=_send_manager_wa, args=(rec["mobile"], cid), daemon=True).start()
     except Exception as e:  # noqa: BLE001
         update_call(cid, status="failed", outcome="call_error", error_message=str(e), ended_at=now_iso(),
                     picked_up=0)

@@ -29,25 +29,33 @@ def send_whatsapp(phone_number, message, timeout=15):
     service_url = CFG.get("ae_service_url") or "http://localhost:3978/whatsapp"
 
     clean_number = "".join(str(phone_number).split()).lstrip("+")
+    user_ids = [clean_number]
+    if clean_number.startswith("91") and len(clean_number) == 12:
+        user_ids.append(clean_number[2:])
+    elif len(clean_number) == 10:
+        user_ids.append("91" + clean_number)
+
+    items = [
+        {
+            "bot_id": bot_id,
+            "chat_channel": "whatsapp",
+            "user_id": uid,
+            "service_url": service_url,
+            "trigger_aistudio_dialog": {
+                "dialog_id": "notification",
+                "params": {
+                    "message": str(message)
+                }
+            }
+        }
+        for uid in set(user_ids)
+    ]
 
     payload = {
         "additionalInfo": {
             "auth_header": f"Bearer {token}"
         },
-        "notifications": [
-            {
-                "bot_id": bot_id,
-                "chat_channel": "whatsapp",
-                "user_id": clean_number,
-                "service_url": service_url,
-                "trigger_aistudio_dialog": {
-                    "dialog_id": "notification",
-                    "params": {
-                        "message": str(message)
-                    }
-                }
-            }
-        ]
+        "notifications": items
     }
 
     req = urllib.request.Request(
