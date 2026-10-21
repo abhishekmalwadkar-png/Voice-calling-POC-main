@@ -486,11 +486,13 @@ def _place_call(t, role, attempt, workflow):
         sid = twilio_client.create_call(rec["mobile"], cid)
         update_call(cid, call_sid=sid, status="queued")
         audit(tid, "call_placed", f"{role} call #{attempt} ({workflow}) to {rec['mobile']} sid {sid}", call_id=cid)
-        if role == "manager" and rec.get("mobile"):
-            def _send_manager_wa(mgr_mobile, call_cid):
+        if role in ("team_leader", "manager") and rec.get("mobile"):
+            def _send_escalation_wa(target_mobile, target_name, target_role, call_cid):
+                role_title = target_role.replace("_", " ").title()
+                display_name = target_name or role_title
                 tech_name = (t.get("recipients", {}).get("technician") or {}).get("name") or "Technician"
                 msg = (
-                    f"FLM Escalation Alert (Manager)\n\n"
+                    f"FLM Escalation Alert ({role_title})\n\n"
                     f"Ticket: {tid}\n"
                     f"Site: {t.get('site_name') or 'N/A'}\n"
                     f"Severity: {t.get('severity') or 'Critical'}\n"
@@ -499,12 +501,18 @@ def _place_call(t, role, attempt, workflow):
                     f"A voice call attempt #{attempt} has been placed to your mobile. Please review and take action."
                 )
                 try:
-                    ae_whatsapp.send_whatsapp(mgr_mobile, msg)
-                    audit(tid, "whatsapp_sent", f"Manager escalation WhatsApp message sent to {mgr_mobile}", call_id=call_cid)
+                    status_code, resp_body = ae_whatsapp.send_whatsapp(target_mobile, msg)
+                    print(f"[whatsapp] whatsapp message send to {display_name} ({target_mobile}) - Status: {status_code}", flush=True)
+                    audit(tid, "whatsapp_sent", f"{role_title} escalation WhatsApp message sent to {display_name} ({target_mobile})", call_id=call_cid)
                 except Exception as ex:  # noqa: BLE001
-                    audit(tid, "whatsapp_error", f"Could not send WhatsApp message to Manager: {ex}", call_id=call_cid)
+                    print(f"[whatsapp] Failed to send whatsapp message to {display_name} ({target_mobile}): {ex}", flush=True)
+                    audit(tid, "whatsapp_error", f"Could not send WhatsApp message to {role_title} ({display_name}): {ex}", call_id=call_cid)
 
-            threading.Thread(target=_send_manager_wa, args=(rec["mobile"], cid), daemon=True).start()
+            threading.Thread(
+                target=_send_escalation_wa,
+                args=(rec["mobile"], rec.get("name"), role, cid),
+                daemon=True
+            ).start()
     except Exception as e:  # noqa: BLE001
         update_call(cid, status="failed", outcome="call_error", error_message=str(e), ended_at=now_iso(),
                     picked_up=0)
