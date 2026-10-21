@@ -652,7 +652,25 @@ ok("Twilio webhook signature: valid -> accepted; forged or tampered -> 403")
 # Dashboard local-only
 assert http("GET", "/", key=None)[0] == 200
 assert http("GET", "/", key=None, headers={"Cf-Connecting-Ip": "1.2.3.4"})[0] == 401
-ok("dashboard renders locally, blocked through the tunnel")
+# Emergency API
+code, emg = http("POST", "/api/emergency_api", {
+    "ticket_id": "EMG1",
+    "alert_id": "ALM-EMG",
+    "site_details": "Site 2040, Riyadh",
+    "description": "Emergency Power Outage",
+    "technician_number": "+911111111111",
+    "technician_name": "Ahmed",
+    "team_leader_number": "+912222222222",
+    "team_leader_name": "Imran",
+    "manager_number": "+913333333333",
+    "manager_name": "Sara",
+    "callback_url": "http://127.0.0.1:5057/hook"
+})
+assert code == 202 and emg["result"] == "emergency_triggered", emg
+assert "technician" in emg["calls_placed"] and "team_leader" in emg["calls_placed"] and "manager" in emg["calls_placed"]
+t_emg = store.get_ticket("EMG1")
+assert t_emg["severity"] == "Emergency" and t_emg["uc1_state"] == "EMERGENCY_TRIGGERED"
+ok("emergency API: /api/emergency_api triggers technician, team leader, manager and WhatsApp")
 
 scheduler.stopped.set()
 server.shutdown()

@@ -57,6 +57,80 @@ def legacy_call(form):
     return 202, dict(legacy_view(tid), status_url=f"/api/call/{tid}")
 
 
+def emergency_call(form):
+    """POST /api/emergency_api or /api/emergency
+    Triggers parallel emergency voice calls to technician, team leader, and manager,
+    and sends WhatsApp alert messages to team leader and manager.
+    Accepts flat fields or nested event format.
+    """
+    if not isinstance(form, dict):
+        raise workflow.EventError("body must be a JSON object")
+
+    ticket_data = form.get("ticket") if isinstance(form.get("ticket"), dict) else {}
+    tid = str(ticket_data.get("ticket_id") or form.get("ticket_id") or "").strip().upper()
+    if not tid:
+        raise workflow.EventError("missing required field: ticket_id")
+
+    site = ticket_data.get("site_name") or form.get("site_details") or form.get("site_name") or "Site N/A"
+    desc = ticket_data.get("description") or form.get("description") or "Emergency Alert"
+    alarm_id = ticket_data.get("alarm_id") or form.get("alert_id") or form.get("alarm_id") or "ALM-EMERGENCY"
+    severity = ticket_data.get("severity") or form.get("severity") or "Emergency"
+    callback_url = form.get("callback_url") or ticket_data.get("callback_url")
+    ack_digit = form.get("ack_digit") or "1"
+    reject_digit = form.get("reject_digit") or "9"
+    default_lang = form.get("language") or "ask"
+
+    stamp = int(time.time() * 1000)
+    aid = ticket_data.get("assignment_id") or form.get("assignment_id") or f"{tid}-EMG{stamp}"
+
+    recipients = {}
+    if isinstance(form.get("recipients"), list):
+        for r in form["recipients"]:
+            if isinstance(r, dict) and r.get("role"):
+                recipients[r["role"]] = {
+                    "mobile": str(r.get("mobile") or "").strip(),
+                    "name": r.get("name") or "",
+                    "language": r.get("language") or default_lang,
+                }
+
+    tech_mob = str(form.get("phone_number") or form.get("technician_number") or "").strip()
+    if tech_mob or "technician" not in recipients:
+        recipients["technician"] = {
+            "mobile": tech_mob or (recipients.get("technician") or {}).get("mobile", ""),
+            "name": form.get("technician_name") or (recipients.get("technician") or {}).get("name", ""),
+            "language": form.get("technician_language") or (recipients.get("technician") or {}).get("language", default_lang),
+        }
+
+    tl_mob = str(form.get("team_leader_number") or "").strip()
+    if tl_mob or "team_leader" not in recipients:
+        recipients["team_leader"] = {
+            "mobile": tl_mob or (recipients.get("team_leader") or {}).get("mobile", ""),
+            "name": form.get("team_leader_name") or (recipients.get("team_leader") or {}).get("name", ""),
+            "language": form.get("team_leader_language") or (recipients.get("team_leader") or {}).get("language", default_lang),
+        }
+
+    mgr_mob = str(form.get("manager_number") or "").strip()
+    if mgr_mob or "manager" not in recipients:
+        recipients["manager"] = {
+            "mobile": mgr_mob or (recipients.get("manager") or {}).get("mobile", ""),
+            "name": form.get("manager_name") or (recipients.get("manager") or {}).get("name", ""),
+            "language": form.get("manager_language") or (recipients.get("manager") or {}).get("language", default_lang),
+        }
+
+    return workflow.trigger_emergency(
+        ticket_id=tid,
+        alarm_id=alarm_id,
+        assignment_id=aid,
+        site_name=site,
+        description=desc,
+        severity=severity,
+        recipients=recipients,
+        callback_url=callback_url,
+        ack_digit=ack_digit,
+        reject_digit=reject_digit,
+    )
+
+
 def legacy_view(tid):
     v = workflow.ticket_view(tid)
     if not v:
@@ -306,6 +380,9 @@ class Handler(BaseHTTPRequestHandler):
                     return self._json_waiting(body["ticket_id"], lambda: dict(
                         body, **workflow.wait_for_call(body["call_id"], options[1])))
                 return self._json(code, body)
+            if path in ("/api/emergency", "/api/emergency_api"):
+                code, body = emergency_call(form)
+                return self._json(code, body)
             if path == "/api/call":
                 options = _wait_options(params) if _wants_wait(params) else None
                 code, body = legacy_call(form)
@@ -377,6 +454,7 @@ def main():
     print(f"Public base URL  : {CFG['base_url'] or '(dry run)'}")
     print(f"Dashboard        : http://localhost:{CFG['port']}  (this PC only)")
     print(f"Event API        : POST {base}/api/events")
+    print(f"Emergency API    : POST {base}/api/emergency_api")
     print(f"Follow-up API    : POST {base}/api/tickets/<ticket_id>/followup")
     print(f"Status API       : GET  {base}/api/tickets/<ticket_id>")
     print(f"API key header   : X-API-Key ({'set from .env' if CFG['api_key'] else 'NOT SET - API is local-only'})",

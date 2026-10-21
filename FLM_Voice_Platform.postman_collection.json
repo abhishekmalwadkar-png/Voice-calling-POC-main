@@ -953,6 +953,38 @@
       "name": "5. Old single-call API",
       "item": [
         {
+          "name": "POST /api/emergency_api - Emergency Call & WhatsApp to All",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/emergency_api",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "emergency_api"
+              ]
+            },
+            "description": "Triggers voice calls simultaneously to Technician, Team Leader, and Manager, and sends WhatsApp alert messages to Team Leader and Manager.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"ticket_id\": \"EMG-{{$timestamp}}\",\n  \"alert_id\": \"ALM-EMERGENCY\",\n  \"site_details\": \"Site 2040, Olaya Branch, Riyadh\",\n  \"description\": \"Emergency ATM Alarm / Power Outage\",\n  \"severity\": \"Emergency\",\n  \"technician_number\": \"{{technician_mobile}}\",\n  \"technician_name\": \"Ahmed Khan\",\n  \"technician_language\": \"en\",\n  \"team_leader_number\": \"{{team_leader_mobile}}\",\n  \"team_leader_name\": \"Imran\",\n  \"team_leader_language\": \"ur\",\n  \"manager_number\": \"{{manager_mobile}}\",\n  \"manager_name\": \"Sara\",\n  \"manager_language\": \"en\",\n  \"callback_url\": \"{{callback_url}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
           "name": "POST /api/call - single call (old API)",
           "request": {
             "method": "POST",

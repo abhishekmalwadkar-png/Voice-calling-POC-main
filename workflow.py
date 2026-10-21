@@ -29,7 +29,7 @@ TICKET_FIELDS = ("ticket_id", "alarm_id", "assignment_id", "site_number", "site_
 CALLED_ROLES = ("technician", "team_leader", "manager")
 E164 = re.compile(r"\+[1-9]\d{7,14}")
 
-TECH_ACTIVE = {"TECH_CALLING", "TECH_WAITING_RETRY"}
+TECH_ACTIVE = {"TECH_CALLING", "TECH_WAITING_RETRY", "EMERGENCY_TRIGGERED"}
 ACTIVE = TECH_ACTIVE | {"ESCALATING"}
 FINAL = {"ACKNOWLEDGED", "TL_REACHED", "MANAGER_REACHED", "ESCALATION_UNRESOLVED", "ESCALATION_NO_CONTACTS",
          "CANCELLED_REASSIGNED", "CANCELLED_CLOSED", "CANCELLED_ALARM_CLEARED"}
@@ -480,45 +480,138 @@ def _place_call(t, role, attempt, workflow):
             "VALUES (?,?,?,?,?,?,?,?,?,?,?,'initiating',?)",
             (tid, t["assignment_id"], workflow, role, attempt, rec.get("name"), rec.get("mobile"), lang, source,
              template, version, now_iso()))
+    if role in ("team_leader", "manager") and rec.get("mobile"):
+        def _send_escalation_wa(target_mobile, target_name, target_role, call_cid):
+            role_title = target_role.replace("_", " ").title()
+            display_name = target_name or role_title
+            tech_name = (t.get("recipients", {}).get("technician") or {}).get("name") or "Technician"
+            is_emergency = str(t.get("severity") or "").lower() == "emergency" or str(t.get("uc1_state") or "") == "EMERGENCY_TRIGGERED" or workflow == "uc1_emergency"
+            alert_type = "Emergency" if is_emergency else "Escalation"
+            tech_line = f"Technician: {tech_name}" if is_emergency else f"Technician: {tech_name} (Unanswered after technician calls)"
+            msg = (
+                f"FLM {alert_type} Alert ({role_title})\n\n"
+                f"Ticket: {tid}\n"
+                f"Site: {t.get('site_name') or 'N/A'}\n"
+                f"Severity: {t.get('severity') or ('Emergency' if is_emergency else 'Critical')}\n"
+                f"Issue: {t.get('description') or 'N/A'}\n"
+                f"{tech_line}\n\n"
+                f"Please review and take action."
+            )
+            try:
+                status_code, resp_body = ae_whatsapp.send_whatsapp(target_mobile, msg)
+                print(f"[whatsapp] whatsapp message send to {display_name} ({target_mobile}) - Status: {status_code}", flush=True)
+                audit(tid, "whatsapp_sent", f"{role_title} {alert_type.lower()} WhatsApp message sent to {display_name} ({target_mobile})", call_id=call_cid)
+            except Exception as ex:  # noqa: BLE001
+                print(f"[whatsapp] Failed to send whatsapp message to {display_name} ({target_mobile}): {ex}", flush=True)
+                audit(tid, "whatsapp_error", f"Could not send WhatsApp message to {role_title} ({display_name}): {ex}", call_id=call_cid)
+
+        threading.Thread(
+            target=_send_escalation_wa,
+            args=(rec["mobile"], rec.get("name"), role, cid),
+            daemon=True
+        ).start()
+
     try:
         if not rec.get("mobile"):
             raise RuntimeError(f"no mobile number for {role}")
         sid = twilio_client.create_call(rec["mobile"], cid)
         update_call(cid, call_sid=sid, status="queued")
         audit(tid, "call_placed", f"{role} call #{attempt} ({workflow}) to {rec['mobile']} sid {sid}", call_id=cid)
-        if role in ("team_leader", "manager") and rec.get("mobile"):
-            def _send_escalation_wa(target_mobile, target_name, target_role, call_cid):
-                role_title = target_role.replace("_", " ").title()
-                display_name = target_name or role_title
-                tech_name = (t.get("recipients", {}).get("technician") or {}).get("name") or "Technician"
-                msg = (
-                    f"FLM Escalation Alert ({role_title})\n\n"
-                    f"Ticket: {tid}\n"
-                    f"Site: {t.get('site_name') or 'N/A'}\n"
-                    f"Severity: {t.get('severity') or 'Critical'}\n"
-                    f"Issue: {t.get('description') or 'N/A'}\n"
-                    f"Technician: {tech_name} (Unanswered after technician calls)\n\n"
-                    f"Please review and take action."
-                )
-                try:
-                    status_code, resp_body = ae_whatsapp.send_whatsapp(target_mobile, msg)
-                    print(f"[whatsapp] whatsapp message send to {display_name} ({target_mobile}) - Status: {status_code}", flush=True)
-                    audit(tid, "whatsapp_sent", f"{role_title} escalation WhatsApp message sent to {display_name} ({target_mobile})", call_id=call_cid)
-                except Exception as ex:  # noqa: BLE001
-                    print(f"[whatsapp] Failed to send whatsapp message to {display_name} ({target_mobile}): {ex}", flush=True)
-                    audit(tid, "whatsapp_error", f"Could not send WhatsApp message to {role_title} ({display_name}): {ex}", call_id=call_cid)
-
-            threading.Thread(
-                target=_send_escalation_wa,
-                args=(rec["mobile"], rec.get("name"), role, cid),
-                daemon=True
-            ).start()
     except Exception as e:  # noqa: BLE001
         update_call(cid, status="failed", outcome="call_error", error_message=str(e), ended_at=now_iso(),
                     picked_up=0)
         audit(tid, "call_error", f"{role} call #{attempt} could not start: {e}", call_id=cid)
         finish_call(cid)
     return cid
+
+
+def trigger_emergency(ticket_id, alarm_id, assignment_id, site_name, description, severity,
+                      recipients, callback_url=None, ack_digit="1", reject_digit="9"):
+    """Trigger parallel emergency voice calls to technician, team leader, and manager,
+    and send WhatsApp push notifications to team leader and manager.
+    """
+    with ticket_lock(ticket_id):
+        t = get_ticket(ticket_id)
+        if not t:
+            q("INSERT INTO tickets (ticket_id, recipients, created_at, updated_at) VALUES (?,?,?,?)",
+              (ticket_id, "{}", now_iso(), now_iso()))
+            t = get_ticket(ticket_id)
+
+        merged = dict(t.get("recipients") or {})
+        for rk, rv in recipients.items():
+            if rv.get("mobile"):
+                merged[rk] = rv
+
+        changes = {
+            "alarm_id": alarm_id,
+            "assignment_id": assignment_id,
+            "site_name": site_name,
+            "description": description,
+            "severity": severity or "Emergency",
+            "status": "Assigned",
+            "recipients": merged,
+            "uc1_assignment_id": assignment_id,
+            "uc1_state": "EMERGENCY_TRIGGERED",
+            "ack_digit": ack_digit,
+            "reject_digit": reject_digit,
+            "last_event_time": now_iso(),
+            "last_event_received_at": epoch(),
+        }
+        if callback_url:
+            changes["callback_url"] = callback_url
+        update_ticket(ticket_id, **changes)
+        t = get_ticket(ticket_id)
+
+        audit(ticket_id, "emergency_triggered",
+              f"Emergency workflow triggered for {ticket_id} at {site_name}. Severity: {severity}")
+
+        calls_placed = {}
+        # 1. Voice call to technician
+        if (merged.get("technician") or {}).get("mobile"):
+            cid = _place_call(t, "technician", 1, "uc1_technician")
+            calls_placed["technician"] = cid
+
+        # 2. Voice call to team leader (automatically sends WhatsApp alert)
+        if (merged.get("team_leader") or {}).get("mobile"):
+            cid = _place_call(t, "team_leader", 1, "uc1_escalation")
+            calls_placed["team_leader"] = cid
+
+        # 3. Voice call to manager (automatically sends WhatsApp alert)
+        if (merged.get("manager") or {}).get("mobile"):
+            cid = _place_call(t, "manager", 1, "uc1_escalation")
+            calls_placed["manager"] = cid
+
+        # Optional initial webhook delivery to callback_url
+        if t.get("callback_url"):
+            notify(ticket_id, "emergency.triggered", {
+                "ticket_id": ticket_id,
+                "alarm_id": alarm_id,
+                "assignment_id": assignment_id,
+                "site_name": site_name,
+                "severity": severity or "Emergency",
+                "status": "EMERGENCY_TRIGGERED",
+                "calls_placed": calls_placed,
+                "recipients": merged,
+            })
+
+        wa_recipients = []
+        for role in ("team_leader", "manager"):
+            if (merged.get(role) or {}).get("mobile"):
+                wa_recipients.append({
+                    "role": role,
+                    "name": merged[role].get("name") or role.replace("_", " ").title(),
+                    "mobile": merged[role]["mobile"],
+                })
+
+        return 202, {
+            "ticket_id": ticket_id,
+            "result": "emergency_triggered",
+            "severity": severity or "Emergency",
+            "calls_placed": calls_placed,
+            "whatsapp_notifications": wa_recipients,
+            "callback_url": t.get("callback_url"),
+            "status_url": f"/api/tickets/{ticket_id}"
+        }
 
 
 # =========================================================================== Twilio webhooks (TwiML)
@@ -702,7 +795,7 @@ def _after_escalation_call(t, c, outcome):
     """Only an answer to the reassign question (1 or 9) ends the escalation. Picking up without a key
     counts as no response: the next attempt or the next person is called."""
     tid, n, role = t["ticket_id"], c["attempt_no"], c["role"]
-    if t["uc1_state"] != "ESCALATING":
+    if t["uc1_state"] not in ("ESCALATING", "EMERGENCY_TRIGGERED"):
         return
     if outcome in ("reassign_yes", "reassign_no"):
         _finish_uc1(tid, "TL_REACHED" if role == "team_leader" else "MANAGER_REACHED")
