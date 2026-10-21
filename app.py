@@ -390,7 +390,13 @@ class Handler(BaseHTTPRequestHandler):
                         body, **workflow.wait_for_call(body["call_id"], options[1])))
                 return self._json(code, body)
             if path in ("/api/emergency", "/api/emergency_api"):
+                options = _wait_options(params) if _wants_wait(params) else None
                 code, body = emergency_call(form)
+                if code == 202 and options:
+                    tid = body["ticket_id"]
+                    t = store.get_ticket(tid)
+                    aid = (t and t.get("assignment_id")) or body.get("assignment_id")
+                    return self._json_waiting(tid, lambda: _wait(tid, aid, options, body))
                 return self._json(code, body)
             if path == "/api/call":
                 options = _wait_options(params) if _wants_wait(params) else None

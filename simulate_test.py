@@ -672,6 +672,18 @@ t_emg = store.get_ticket("EMG1")
 assert t_emg["severity"] == "Emergency" and t_emg["uc1_state"] == "EMERGENCY_TRIGGERED"
 ok("emergency API: /api/emergency_api triggers technician, team leader, manager and WhatsApp")
 
+code, emg_wait = http("POST", "/api/emergency_api?wait=true&timeout=1", {
+    "ticket_id": "EMG2",
+    "alert_id": "ALM-EMG2",
+    "site_details": "Site 2040, Riyadh",
+    "technician_number": "+911111111111",
+    "technician_name": "Ahmed",
+    "team_leader_number": "+912222222222",
+    "manager_number": "+913333333333",
+})
+assert code == 200 and emg_wait["timed_out"] is True and emg_wait["call_result"] == "pending", emg_wait
+ok("emergency API: ?wait=true&until=final&timeout=... works synchronously")
+
 scheduler.stopped.set()
 server.shutdown()
 print(f"\nALL {len(PASSED)} TESTS PASSED")
