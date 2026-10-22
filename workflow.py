@@ -280,8 +280,10 @@ def _release_held_jobs(tid):
     return []
 
 
-def _end_live_calls(tid, why):
+def _end_live_calls(tid, why, exclude_cid=None):
     for c in q("SELECT * FROM calls WHERE ticket_id=? AND processed=0 AND superseded IS NULL", (tid,)):
+        if exclude_cid and c["id"] == exclude_cid:
+            continue
         update_call(c["id"], superseded=why)
         try:
             twilio_client.end_call(c["call_sid"], c["status"])
@@ -379,10 +381,11 @@ def _start_uc1(t):
     return [_schedule(tid, t["assignment_id"], "tech_call", 1, 0)]
 
 
-def _mark_acknowledged(t, via):
+def _mark_acknowledged(t, via, call_cid=None):
     tid = t["ticket_id"]
     update_ticket(tid, uc1_state="ACKNOWLEDGED", uc1_ack_via=via, uc1_ack_at=now_iso())
     _cancel_jobs(tid, ("tech_call", "tl_call", "manager_call"), "acknowledged")
+    _end_live_calls(tid, "technician acknowledged", exclude_cid=call_cid)
     audit(tid, "acknowledged", f"Technician acknowledged via {via}")
     if CFG["followup_sec"] > 0:
         action = _schedule(tid, t["assignment_id"], "followup", 1, CFG["followup_sec"])
@@ -642,7 +645,8 @@ def twiml_voice(cid, retry):
     c = get_call(cid)
     if not c:
         return _twiml("<Hangup/>")
-    if c["superseded"]:
+    t = get_ticket(c["ticket_id"])
+    if c["superseded"] or (c["workflow"] == "uc1_escalation" and t and t["uc1_state"] == "ACKNOWLEDGED"):
         return _twiml(texts.say(c["language"] or "en", texts.LANGS[c["language"] or "en"]["goodbye"]) + "<Hangup/>")
     if not c["answered_at"]:
         update_call(cid, answered_at=now_iso(), picked_up=1)
@@ -712,6 +716,9 @@ def twiml_gather(cid, retry, digits):
         update_call(cid, dtmf=",".join(x for x in (c["dtmf"], digits) if x))
         audit(c["ticket_id"], "dtmf", f"{c['role']} pressed '{digits}'", call_id=cid)
         if c["workflow"] == "uc1_escalation":
+            if c["superseded"] or t["uc1_state"] == "ACKNOWLEDGED":
+                update_call(cid, outcome="superseded", ack_result="ignored")
+                return _twiml(texts.say(lang, texts.LANGS[lang]["goodbye"]) + "<Hangup/>")
             if digits in (t["ack_digit"], t["reject_digit"]):
                 decision = "reassign_yes" if digits == t["ack_digit"] else "reassign_no"
                 update_call(cid, outcome=decision, ack_result="valid")
@@ -769,14 +776,20 @@ def finish_call(cid):
         if not q("UPDATE calls SET processed=1 WHERE id=? AND processed=0", (cid,)):
             return
         c = get_call(cid)
+        tid = c["ticket_id"]
+        t = get_ticket(tid)
+        if c["superseded"] or (c["workflow"] == "uc1_escalation" and t and t["uc1_state"] == "ACKNOWLEDGED"):
+            update_call(cid, superseded=c["superseded"] or "technician acknowledged")
+            audit(tid, "call_finished", f"{c['role']} call #{c['attempt_no']}: ended (technician already acknowledged)", call_id=cid)
+            audit(tid, "call_ignored", f"Result of superseded call #{c['attempt_no']} not used", call_id=cid)
+            return
+
         outcome = c["outcome"] or ("hung_up_without_response" if c["picked_up"] else "not_picked_up")
         picked = 0 if outcome in NOT_PICKED_UP else 1
         update_call(cid, outcome=outcome, picked_up=picked)
-        tid = c["ticket_id"]
         audit(tid, "call_finished", f"{c['role']} call #{c['attempt_no']}: {RESPONSE_TEXT.get(outcome, outcome)}",
               call_id=cid)
-        t = get_ticket(tid)
-        if c["superseded"] or c["assignment_id"] != t["assignment_id"]:
+        if c["assignment_id"] != t["assignment_id"]:
             audit(tid, "call_ignored", f"Result of superseded call #{c['attempt_no']} not used", call_id=cid)
             return
         if c["workflow"] == "uc1_technician":
@@ -793,7 +806,7 @@ def _after_technician_call(t, c, outcome):
     if t["uc1_state"] not in TECH_ACTIVE:
         return
     if outcome == "acknowledged":
-        _mark_acknowledged(t, "voice")
+        _mark_acknowledged(t, "voice", call_cid=c["id"])
     elif outcome == "rejected":
         _escalate(t, "rejected", n)
     elif n < CFG["tech_max_attempts"]:
