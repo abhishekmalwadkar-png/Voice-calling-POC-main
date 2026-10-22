@@ -464,7 +464,7 @@ def trigger_followup(tid, assignment_id=None):
         return 202, {"ticket_id": tid, "result": "reminder_call_placed", "call_id": cid}
 
 
-def _place_call(t, role, attempt, workflow):
+def _place_call(t, role, attempt, workflow, send_wa=True):
     tid = t["ticket_id"]
     rec = t["recipients"].get(role) or {}
     lang, source = texts.resolve_language(rec.get("language"))
@@ -480,7 +480,7 @@ def _place_call(t, role, attempt, workflow):
             "VALUES (?,?,?,?,?,?,?,?,?,?,?,'initiating',?)",
             (tid, t["assignment_id"], workflow, role, attempt, rec.get("name"), rec.get("mobile"), lang, source,
              template, version, now_iso()))
-    if role in ("team_leader", "manager") and rec.get("mobile"):
+    if send_wa and role in ("team_leader", "manager") and rec.get("mobile"):
         send_whatsapp_alert(t, role, rec, call_cid=cid)
 
     try:
@@ -577,12 +577,17 @@ def trigger_emergency(ticket_id, alarm_id, assignment_id, site_name, description
               f"Emergency workflow triggered for {ticket_id} at {site_name}. Severity: {severity}")
 
         calls_placed = {}
-        # 1. Voice call to technician
+        # 1. Voice call to technician (up to 2 attempts via retry)
         if (merged.get("technician") or {}).get("mobile"):
             cid = _place_call(t, "technician", 1, "uc1_technician")
             calls_placed["technician"] = cid
 
-        # 2. WhatsApp alerts to Team Leader and Manager (no voice calls in emergency)
+        # 2. Voice call to team leader (1 attempt)
+        if (merged.get("team_leader") or {}).get("mobile"):
+            cid = _place_call(t, "team_leader", 1, "uc1_escalation", send_wa=False)
+            calls_placed["team_leader"] = cid
+
+        # 3. WhatsApp alerts to Team Leader and Manager (1 message each)
         wa_recipients = []
         for role in ("team_leader", "manager"):
             rec_role = merged.get(role)
