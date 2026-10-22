@@ -7,6 +7,7 @@ WhatsApp is out of scope (handled by another system - use the outbound webhook e
 Run:  python app.py      (standard library only)
 API:  see "FLM Voice Call API Guide"; every /api/* call needs header X-API-Key.
 """
+import importlib
 import json
 import re
 import subprocess
@@ -16,12 +17,27 @@ import urllib.parse
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from xml.sax.saxutils import escape
 
+import ae_whatsapp
 import queries
 import store
 import texts
 import twilio_client
 import workflow
 from config import CFG
+
+
+def _reload_modules():
+    """Hot-reload modified modules into memory without restarting the server or tunnel."""
+    modules = [texts, ae_whatsapp, queries, workflow]
+    reloaded = []
+    for mod in modules:
+        try:
+            importlib.reload(mod)
+            reloaded.append(mod.__name__)
+        except Exception as e:
+            reloaded.append(f"{mod.__name__} (error: {e})")
+    return reloaded
+
 
 
 # --------------------------------------------------------------------------- legacy single-call API (/api/call)
@@ -317,7 +333,8 @@ class Handler(BaseHTTPRequestHandler):
             return True
         if path.startswith("/api/"):
             if CFG["api_key"]:
-                return self.headers.get("X-API-Key") == CFG["api_key"]
+                query_key = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query).get("key", [""])[0]
+                return self.headers.get("X-API-Key") == CFG["api_key"] or (bool(query_key) and query_key == CFG["api_key"])
             return self._from_this_pc()
         return self._from_this_pc()  # dashboard and its call form: this PC only
 
@@ -330,6 +347,13 @@ class Handler(BaseHTTPRequestHandler):
                 return self._send(200, dashboard_html())
             if path == "/api/health":
                 return self._json(200, {"status": "ok", "dry_run": CFG["dry_run"], "time": store.now_iso()})
+            if path == "/api/reload":
+                return self._json(200, {
+                    "status": "ok",
+                    "action": "modules_reloaded",
+                    "modules": _reload_modules(),
+                    "time": store.now_iso(),
+                })
             if path == "/api/config":
                 return self._json(200, queries.config_view())
             if path == "/api/tickets":
@@ -368,9 +392,16 @@ class Handler(BaseHTTPRequestHandler):
             if path.startswith("/twilio/"):
                 return self._send(403, "invalid Twilio signature", "text/plain")
             return self._json(401, {"error": "unauthorized - send header X-API-Key"})
-        if form is None:
+        if form is None and path != "/api/reload":
             return self._json(400, {"error": "body is not valid JSON"})
         try:
+            if path == "/api/reload":
+                return self._json(200, {
+                    "status": "ok",
+                    "action": "modules_reloaded",
+                    "modules": _reload_modules(),
+                    "time": store.now_iso(),
+                })
             if path == "/api/events":
                 wants = _wants_wait(params) and str(form.get("event_type", "")).upper() in (
                     "ASSIGNMENT_CREATED", "REASSIGNED")
@@ -472,6 +503,7 @@ def main():
     print(f"Emergency API    : POST {base}/api/emergency_api")
     print(f"Follow-up API    : POST {base}/api/tickets/<ticket_id>/followup")
     print(f"Status API       : GET  {base}/api/tickets/<ticket_id>")
+    print(f"Reload API       : GET/POST {base}/api/reload")
     print(f"API key header   : X-API-Key ({'set from .env' if CFG['api_key'] else 'NOT SET - API is local-only'})",
           flush=True)
     server.serve_forever()
