@@ -320,7 +320,7 @@ def contact_guard(t, job):
     age = epoch() - (t["last_event_received_at"] or 0)
     if CFG["state_max_age_sec"] and age > CFG["state_max_age_sec"]:
         return "hold", f"ticket state is {int(age)} s old (limit {CFG['state_max_age_sec']} s)"
-    needs = {"tech_call": TECH_ACTIVE, "tl_call": {"ESCALATING"}, "manager_call": {"ESCALATING"}}
+    needs = {"tech_call": TECH_ACTIVE, "tl_call": {"ESCALATING", "EMERGENCY_TRIGGERED"}, "manager_call": {"ESCALATING"}}
     if job["kind"] in needs and t["uc1_state"] not in needs[job["kind"]]:
         return "cancel", f"no longer needed (call workflow is {t['uc1_state']})"
     if job["kind"] == "followup" and t["followup_state"] != "SCHEDULED":
@@ -483,7 +483,9 @@ def _place_call(t, role, attempt, workflow, send_wa=True):
             "VALUES (?,?,?,?,?,?,?,?,?,?,?,'initiating',?)",
             (tid, t["assignment_id"], workflow, role, attempt, rec.get("name"), rec.get("mobile"), lang, source,
              template, version, now_iso()))
-    if send_wa and role in ("team_leader", "manager") and rec.get("mobile"):
+    is_emergency = (str(t.get("severity") or "").lower() == "emergency" or
+                    str(t.get("uc1_state") or "") == "EMERGENCY_TRIGGERED")
+    if send_wa and not is_emergency and role in ("team_leader", "manager") and rec.get("mobile"):
         send_whatsapp_alert(t, role, rec, call_cid=cid)
 
     try:
@@ -780,8 +782,9 @@ def finish_call(cid):
         tid = c["ticket_id"]
         t = get_ticket(tid)
         if c["superseded"] or (c["workflow"] == "uc1_escalation" and t and t["uc1_state"] == "ACKNOWLEDGED"):
-            update_call(cid, superseded=c["superseded"] or "technician acknowledged")
-            audit(tid, "call_finished", f"{c['role']} call #{c['attempt_no']}: ended (technician already acknowledged)", call_id=cid)
+            reason = c["superseded"] or "technician already acknowledged"
+            update_call(cid, superseded=reason)
+            audit(tid, "call_finished", f"{c['role']} call #{c['attempt_no']}: ended ({reason})", call_id=cid)
             audit(tid, "call_ignored", f"Result of superseded call #{c['attempt_no']} not used", call_id=cid)
             return
 
@@ -814,8 +817,9 @@ def _after_technician_call(t, c, outcome):
                     str(t.get("uc1_state") or "") == "EMERGENCY_TRIGGERED")
     if is_emergency:
         # Emergency: strictly 1 call to technician (no retry). Team Leader was dialed in parallel.
-        tl_call = q("SELECT * FROM calls WHERE ticket_id=? AND role='team_leader' ORDER BY id DESC LIMIT 1", (tid,), one=True)
-        if not tl_call or tl_call["processed"]:
+        tl_pending = q("SELECT COUNT(*) AS c FROM jobs WHERE ticket_id=? AND kind='tl_call' AND status='pending'", (tid,), one=True)["c"]
+        tl_active = q("SELECT COUNT(*) AS c FROM calls WHERE ticket_id=? AND role='team_leader' AND processed=0", (tid,), one=True)["c"]
+        if tl_pending == 0 and tl_active == 0:
             if t["uc1_state"] == "EMERGENCY_TRIGGERED":
                 _finish_uc1(tid, "ESCALATION_UNRESOLVED")
         return
@@ -841,9 +845,13 @@ def _after_escalation_call(t, c, outcome):
     is_emergency = (str(t.get("severity") or "").lower() == "emergency" or
                     str(t.get("uc1_state") or "") == "EMERGENCY_TRIGGERED")
     if is_emergency:
-        # Emergency: strictly 1 call to Team Leader (no retry). Never call Manager.
-        tech_call = q("SELECT * FROM calls WHERE ticket_id=? AND role='technician' ORDER BY id DESC LIMIT 1", (tid,), one=True)
-        if not tech_call or tech_call["processed"]:
+        # Emergency: Team Leader gets a 2nd call attempt if they do not pick up attempt 1. Never call Manager.
+        if role == "team_leader" and n < 2:
+            _schedule(tid, t["assignment_id"], "tl_call", n + 1, CFG["manager_retry_sec"])
+            return
+
+        tech_active = q("SELECT COUNT(*) AS c FROM calls WHERE ticket_id=? AND role='technician' AND processed=0", (tid,), one=True)["c"]
+        if tech_active == 0:
             if t["uc1_state"] == "EMERGENCY_TRIGGERED":
                 _finish_uc1(tid, "ESCALATION_UNRESOLVED")
         return
