@@ -812,6 +812,11 @@ def _after_escalation_call(t, c, outcome):
     if outcome in ("reassign_yes", "reassign_no"):
         _finish_uc1(tid, "TL_REACHED" if role == "team_leader" else "MANAGER_REACHED")
         return
+    is_emergency = (str(t.get("severity") or "").lower() == "emergency" or
+                    str(t.get("uc1_state") or "") == "EMERGENCY_TRIGGERED")
+    if is_emergency:
+        _finish_uc1(tid, "ESCALATION_UNRESOLVED")
+        return
     has_manager = bool(t["recipients"].get("manager", {}).get("mobile"))
     if role == "team_leader" and n < CFG["tl_max_attempts"]:
         _schedule(tid, t["assignment_id"], "tl_call", n + 1, CFG["manager_retry_sec"])
