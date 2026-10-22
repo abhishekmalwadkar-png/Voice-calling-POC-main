@@ -543,8 +543,9 @@ def send_whatsapp_alert(t, role, rec, call_cid=None, alert_type_override=None):
 def trigger_emergency(ticket_id, alarm_id, assignment_id, site_name, description, severity,
                       recipients, callback_url=None, ack_digit="1", reject_digit="9"):
     """Emergency workflow:
-    1. Technician receives a voice call.
-    2. Team Leader and Manager receive WhatsApp alert messages (no voice calls).
+    1. Technician receives a voice call (1 attempt only, no retries).
+    2. Team Leader receives a voice call (1 attempt only, no retries).
+    3. Team Leader and Manager receive WhatsApp alert messages (Manager receives NO voice calls).
     """
     with ticket_lock(ticket_id):
         t = get_ticket(ticket_id)
@@ -807,7 +808,19 @@ def _after_technician_call(t, c, outcome):
         return
     if outcome == "acknowledged":
         _mark_acknowledged(t, "voice", call_cid=c["id"])
-    elif outcome == "rejected":
+        return
+
+    is_emergency = (str(t.get("severity") or "").lower() == "emergency" or
+                    str(t.get("uc1_state") or "") == "EMERGENCY_TRIGGERED")
+    if is_emergency:
+        # Emergency: strictly 1 call to technician (no retry). Team Leader was dialed in parallel.
+        tl_call = q("SELECT * FROM calls WHERE ticket_id=? AND role='team_leader' ORDER BY id DESC LIMIT 1", (tid,), one=True)
+        if not tl_call or tl_call["processed"]:
+            if t["uc1_state"] == "EMERGENCY_TRIGGERED":
+                _finish_uc1(tid, "ESCALATION_UNRESOLVED")
+        return
+
+    if outcome == "rejected":
         _escalate(t, "rejected", n)
     elif n < CFG["tech_max_attempts"]:
         update_ticket(tid, uc1_state="TECH_WAITING_RETRY")
@@ -828,7 +841,11 @@ def _after_escalation_call(t, c, outcome):
     is_emergency = (str(t.get("severity") or "").lower() == "emergency" or
                     str(t.get("uc1_state") or "") == "EMERGENCY_TRIGGERED")
     if is_emergency:
-        _finish_uc1(tid, "ESCALATION_UNRESOLVED")
+        # Emergency: strictly 1 call to Team Leader (no retry). Never call Manager.
+        tech_call = q("SELECT * FROM calls WHERE ticket_id=? AND role='technician' ORDER BY id DESC LIMIT 1", (tid,), one=True)
+        if not tech_call or tech_call["processed"]:
+            if t["uc1_state"] == "EMERGENCY_TRIGGERED":
+                _finish_uc1(tid, "ESCALATION_UNRESOLVED")
         return
     has_manager = bool(t["recipients"].get("manager", {}).get("mobile"))
     if role == "team_leader" and n < CFG["tl_max_attempts"]:
