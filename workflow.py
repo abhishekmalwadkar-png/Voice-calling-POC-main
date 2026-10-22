@@ -521,6 +521,8 @@ def send_whatsapp_alert(t, role, rec, call_cid=None, alert_type_override=None):
     )
 
     def _do_send():
+        if role == "manager":
+            time.sleep(1.5)
         try:
             status_code, resp_body = ae_whatsapp.send_whatsapp(rec["mobile"], msg)
             print(f"[whatsapp] whatsapp message send to {display_name} ({rec['mobile']}) - Status: {status_code}", flush=True)
