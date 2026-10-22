@@ -68,7 +68,7 @@ def legacy_call(form):
 
 def emergency_call(form):
     """POST /api/emergency_api or /api/emergency
-    Triggers parallel emergency voice calls to technician, team leader, and manager,
+    Triggers emergency voice call to technician,
     and sends WhatsApp alert messages to team leader and manager.
     Accepts flat fields or nested event format.
     """

@@ -667,10 +667,12 @@ code, emg = http("POST", "/api/emergency_api", {
     "callback_url": "http://127.0.0.1:5057/hook"
 })
 assert code == 202 and emg["result"] == "emergency_triggered", emg
-assert "technician" in emg["calls_placed"] and "team_leader" in emg["calls_placed"] and "manager" in emg["calls_placed"]
+assert "technician" in emg["calls_placed"]
+assert "team_leader" not in emg["calls_placed"] and "manager" not in emg["calls_placed"]
+assert len(emg["whatsapp_notifications"]) == 2
 t_emg = store.get_ticket("EMG1")
 assert t_emg["severity"] == "Emergency" and t_emg["uc1_state"] == "EMERGENCY_TRIGGERED"
-ok("emergency API: /api/emergency_api triggers technician, team leader, manager and WhatsApp")
+ok("emergency API: /api/emergency_api triggers technician call and team leader / manager WhatsApp")
 
 code, emg_wait = http("POST", "/api/emergency_api?wait=true&timeout=1", {
     "ticket_id": "EMG2",
