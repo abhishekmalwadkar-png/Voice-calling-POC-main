@@ -10,8 +10,8 @@ from config import CFG
 
 def get_token(timeout=10):
     """Fetch a fresh dynamic JWT Bearer token from AutomationEdge using AE_AUTH_SECRET."""
-    secret = CFG.get("ae_auth_secret") or "aistudio_qa"
-    url = CFG.get("ae_auth_url") or "https://dev-p280.ac2.automationedge.com/authenticate"
+    secret = CFG.get("ae_auth_secret") or "AistudioQA"
+    url = CFG.get("ae_auth_url") or "https://dev-p187.ac2.automationedge.com/authenticate"
     req = urllib.request.Request(
         url,
         headers={"Authorization": f"Bearer {secret}"},
@@ -24,8 +24,8 @@ def get_token(timeout=10):
 def send_whatsapp(phone_number, message, timeout=15):
     """Send a WhatsApp message to a phone number using AutomationEdge Push Notifications API."""
     token = get_token()
-    push_url = CFG.get("ae_push_url") or "https://dev-p280.ac2.automationedge.com/api/push-notifications"
-    bot_id = CFG.get("ae_bot_id") or "717940961400025"
+    push_url = CFG.get("ae_push_url") or "https://dev-p187.ac2.automationedge.com/api/push-notifications"
+    bot_id = CFG.get("ae_bot_id") or "104650799293101"
     service_url = CFG.get("ae_service_url") or "http://localhost:3978/whatsapp"
     if "automationedge.com" in service_url:
         service_url = "http://localhost:3978/whatsapp"

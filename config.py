@@ -72,9 +72,9 @@ CFG = {
     # Outbound notifications (e.g. to drive WhatsApp from another system)
     "webhook_url": _env("RESULT_WEBHOOK_URL"),
     # AutomationEdge WhatsApp Integration
-    "ae_auth_secret": _env("AE_AUTH_SECRET", "aistudio_qa"),
-    "ae_auth_url": _env("AE_AUTH_URL", "https://dev-p280.ac2.automationedge.com/authenticate"),
-    "ae_push_url": _env("AE_PUSH_URL", "https://dev-p280.ac2.automationedge.com/api/push-notifications"),
+    "ae_auth_secret": _env("AE_AUTH_SECRET", "AistudioQA"),
+    "ae_auth_url": _env("AE_AUTH_URL", "https://dev-p187.ac2.automationedge.com/authenticate"),
+    "ae_push_url": _env("AE_PUSH_URL", "https://dev-p187.ac2.automationedge.com/api/push-notifications"),
     "ae_service_url": _env("AE_SERVICE_URL", "http://localhost:3978/whatsapp"),
-    "ae_bot_id": _env("AE_BOT_ID", "717940961400025"),
+    "ae_bot_id": _env("AE_BOT_ID", "104650799293101"),
 }
