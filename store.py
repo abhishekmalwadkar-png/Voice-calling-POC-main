@@ -3,9 +3,11 @@ import json
 import sqlite3
 import threading
 import time
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 
 from config import CFG
+
+LOCAL_TZ = timezone(timedelta(hours=5, minutes=30))  # IST (UTC+05:30)
 
 DB_LOCK = threading.RLock()
 _TICKET_LOCKS = {}
@@ -88,11 +90,11 @@ def ticket_lock(ticket_id):
 
 
 def now_iso():
-    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    return datetime.now(LOCAL_TZ).strftime("%Y-%m-%dT%H:%M:%S+05:30")
 
 
 def iso_at(epoch):
-    return datetime.fromtimestamp(epoch, timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    return datetime.fromtimestamp(epoch, LOCAL_TZ).strftime("%Y-%m-%dT%H:%M:%S+05:30")
 
 
 def parse_time(value):
@@ -101,7 +103,7 @@ def parse_time(value):
         return None
     try:
         dt = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
-        return (dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)).timestamp()
+        return (dt if dt.tzinfo else dt.replace(tzinfo=LOCAL_TZ)).timestamp()
     except ValueError:
         return None
 
