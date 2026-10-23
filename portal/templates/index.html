@@ -1,0 +1,167 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Live Portal · Remote Machine Logs</title>
+  <meta name="description" content="Real-time remote log streaming portal for FLM Voice Platform and start_server.bat">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <!-- Header -->
+  <header class="app-header">
+    <div class="header-inner">
+      <div class="brand">
+        <div class="logo-badge">⚡</div>
+        <div class="brand-text">
+          <h1>Remote Log Portal <span>Live Stream</span></h1>
+          <p>Real-time stdout, stderr & audit trail from remote machine</p>
+        </div>
+      </div>
+
+      <div class="agent-status-pill" id="agent-status-pill">
+        <span class="status-dot"></span>
+        <span id="status-text">CONNECTING...</span>
+      </div>
+
+      <div class="header-actions">
+        <button id="setup-btn" class="btn" title="View remote machine setup instructions">
+          📖 Setup Remote Agent
+        </button>
+        <button id="download-btn" class="btn" title="Export current logs to .txt file">
+          📥 Download
+        </button>
+        <button id="clear-btn" class="btn btn-danger" title="Clear current logs">
+          🗑️ Clear
+        </button>
+      </div>
+    </div>
+  </header>
+
+  <!-- Main Content -->
+  <main class="main-content">
+    <!-- Metrics Grid -->
+    <section class="metrics-grid">
+      <div class="metric-card received">
+        <div class="metric-title">
+          <span>Total Streamed</span>
+          <span>📊</span>
+        </div>
+        <div class="metric-value" id="metric-total">0</div>
+      </div>
+      <div class="metric-card errors">
+        <div class="metric-title">
+          <span>Errors & Exceptions</span>
+          <span>🚨</span>
+        </div>
+        <div class="metric-value" id="metric-errors">0</div>
+      </div>
+      <div class="metric-card warnings">
+        <div class="metric-title">
+          <span>Warnings & Retries</span>
+          <span>⚠️</span>
+        </div>
+        <div class="metric-value" id="metric-warnings">0</div>
+      </div>
+      <div class="metric-card host">
+        <div class="metric-title">
+          <span>Remote Source</span>
+          <span>🖥️</span>
+        </div>
+        <div class="metric-value" id="metric-host">Waiting for agent...</div>
+      </div>
+    </section>
+
+    <!-- Toolbar -->
+    <section class="toolbar">
+      <div class="toolbar-left">
+        <div class="search-box">
+          <span class="search-icon">🔍</span>
+          <input type="text" id="search-input" placeholder="Search logs, tickets, CallSIDs, errors...">
+          <button id="clear-search-btn" class="clear-search-btn">✕</button>
+        </div>
+        <div class="filter-tags">
+          <button class="tag-btn active" data-tag="ALL">All</button>
+          <button class="tag-btn" data-tag="ERROR">Errors</button>
+          <button class="tag-btn" data-tag="WARN">Warnings</button>
+          <button class="tag-btn" data-tag="TWILIO">Twilio Calls</button>
+          <button class="tag-btn" data-tag="AUDIT">Tickets / Audit</button>
+        </div>
+      </div>
+
+      <div class="toolbar-right">
+        <button id="auto-scroll-btn" class="btn btn-toggle active" title="Toggle Auto-Scroll">
+          ⬇ Auto-Scroll
+        </button>
+        <button id="sound-alert-btn" class="btn btn-toggle" title="Sound alert on errors">
+          🔔 Sound
+        </button>
+        <button id="copy-btn" class="btn" title="Copy visible logs">
+          📋 Copy
+        </button>
+      </div>
+    </section>
+
+    <!-- Terminal -->
+    <section class="terminal-wrapper">
+      <div class="terminal-header">
+        <div class="term-dots">
+          <span class="term-dot red"></span>
+          <span class="term-dot yellow"></span>
+          <span class="term-dot green"></span>
+        </div>
+        <div class="term-title">remote-console :: start_server.bat</div>
+        <div class="term-meta" id="line-count-badge">0 lines</div>
+      </div>
+      <div class="terminal-body" id="terminal-body">
+        <div class="terminal-empty">
+          <div class="empty-icon">📡</div>
+          <p><b>Ready & Listening for Remote Machine</b></p>
+          <p style="font-size:12px;margin-top:6px;color:#64748b;">
+            Start the monitored server on your remote machine to stream live output here.
+          </p>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <!-- Setup Modal Guide -->
+  <div class="modal-overlay" id="setup-modal">
+    <div class="modal-card">
+      <div class="modal-header">
+        <h2>Remote Machine Setup Guide</h2>
+        <button id="close-modal-btn" class="btn" style="padding:4px 8px;">✕</button>
+      </div>
+      <div class="modal-body">
+        <p>To view logs from your remote Windows machine in this portal without logging in every time:</p>
+        
+        <p><b>Step 1: Check your local Portal address</b><br>
+        Your local machine IP address is: <code style="color:var(--accent-cyan);" id="detected-local-ip">YOUR_IP</code><br>
+        If both machines are on the same network/VPN, use: <code style="color:var(--accent-cyan);">http://YOUR_LOCAL_IP:8088/api/ingest</code>.<br>
+        If cross-network / internet, start the portal with <code>--tunnel</code> to get a public URL!
+        </p>
+
+        <p><b>Step 2: Copy the <code>remote_agent</code> folder to your remote machine</b><br>
+        The folder contains <code>log_streamer.py</code> and <code>run_remote.bat</code>.
+        </p>
+
+        <p><b>Step 3: Run on the Remote Machine</b><br>
+        On your remote machine, edit <code>run_remote.bat</code> with your portal URL and double-click it. It will launch <code>start_server.bat</code> and stream every line live here!</p>
+
+        <div class="code-block">
+          <pre id="quick-cmd">set PORTAL_URL=http://YOUR_IP:8088/api/ingest&#10;run_remote.bat</pre>
+          <button class="copy-mini-btn" data-target="quick-cmd">Copy</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Toast Notification Container -->
+  <div class="toast-container" id="toast-container"></div>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>

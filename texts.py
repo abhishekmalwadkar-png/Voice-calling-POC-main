@@ -29,8 +29,12 @@ LANGS = {
         "reassign_no": "Thank you. This alert will not be assigned to another technician. Goodbye.",
         "reason_rejected": "has rejected the assignment",
         "reason_no_ack": "has not acknowledged the assignment after {n} calls",
+        "emergency_technician": "{greet} This ticket with number {t} has severity critical. Please take action immediately. Press {ack} to acknowledge this ticket. Press {rej} to reject it.",
+        "emergency_escalation": "{greet} This is the helpdesk emergency escalation for ticket {t}. Technician {name} {reason}. Please take action or ask technician to review it.",
+        "emergency_reason_no_answer": "did not answer the call",
+        "emergency_reason_rejected": "has rejected the assignment",
         "reminder": "Reminder from the Automation Edge helpdesk. Ticket {t}, at site {s}, is still waiting for "
-                    "your status update. Please update departed, arrived or started in NexTask.",
+        "your status update. Please update departed, arrived or started in NexTask.",
         "ack": "Thank you. Your acknowledgement has been recorded. Goodbye.",
         "reject": "Your rejection has been recorded. The ticket will be escalated. Goodbye.",
         "invalid": "Sorry, that is not a valid option.",
@@ -51,6 +55,10 @@ LANGS = {
         "reassign_no": "شكرا لك. لن يتم إسناد هذا التنبيه إلى فني آخر. مع السلامة.",
         "reason_rejected": "رفض المهمة",
         "reason_no_ack": "لم يؤكد استلام المهمة بعد {n} مكالمات",
+        "emergency_technician": "{greet} هذه التذكرة برقم {t} ذات درجة خطورة حرجة. يرجى اتخاذ الإجراء فورا. اضغط {ack} لتأكيد الاستلام. اضغط {rej} للرفض.",
+        "emergency_escalation": "{greet} هذا تصعيد طارئ للتذكرة {t}. الفني {name} {reason}. يرجى اتخاذ الإجراء أو مطالبة الفني بمراجعتها.",
+        "emergency_reason_no_answer": "لم يرد على المكالمة",
+        "emergency_reason_rejected": "رفض المهمة",
         "reminder": "تذكير من مكتب المساعدة. التذكرة {t} في الموقع {s} ما زالت بانتظار تحديث حالتك. "
                     "يرجى تحديث الحالة في نكست تاسك: غادرت، وصلت أو بدأت.",
         "ack": "شكرا لك. تم تسجيل تأكيد الاستلام. مع السلامة.",
@@ -70,11 +78,15 @@ LANGS = {
         "escalation": "{greet} यह हेल्पडेस्क एस्केलेशन है। टिकट {t}, साइट {s}।{alarm} "
                       "टेक्नीशियन {name} {reason}।",
         "escalation_question": "क्या यह अलर्ट किसी दूसरे टेक्नीशियन को दे दिया जाए? "
-                               "हाँ के लिए {ack} दबाइए। नहीं के लिए {rej} दबाइए।",
+                                "हाँ के लिए {ack} दबाइए। नहीं के लिए {rej} दबाइए।",
         "reassign_yes": "शुक्रिया। यह अलर्ट दूसरे टेक्नीशियन को दे दिया जाएगा। ख़ुदा हाफ़िज़।",
         "reassign_no": "शुक्रिया। यह अलर्ट दूसरे टेक्नीशियन को नहीं दिया जाएगा। ख़ुदा हाफ़िज़।",
         "reason_rejected": "ने असाइनमेंट मुस्तरद कर दिया है",
         "reason_no_ack": "ने {n} कॉल के बाद भी असाइनमेंट क़ुबूल नहीं किया",
+        "emergency_technician": "{greet} यह टिकट नंबर {t} क्रिटिकल सेवेरिटी का है। बराए मेहरबानी फ़ौरन कार्रवाई कीजिए। टिकट क़ुबूल करने के लिए {ack} दबाइए। मुस्तरद करने के लिए {rej} दबाइए।",
+        "emergency_escalation": "{greet} यह टिकट {t} का इमरजेंसी एस्केलेशन है। टेक्नीशियन {name} {reason}। बराए मेहरबानी कार्रवाई कीजिए या टेक्नीशियन से रिव्यू करने को कहिए।",
+        "emergency_reason_no_answer": "ने कॉल का जवाब नहीं दिया",
+        "emergency_reason_rejected": "ने असाइनमेंट मुस्तरद कर दिया है",
         "reminder": "हेल्पडेस्क की याद-दहानी। टिकट {t}, साइट {s}, पर आपका स्टेटस अपडेट अभी बाक़ी है। "
                     "बराए मेहरबानी नेक्स्ट टास्क में रवाना, पहुँच गए या काम शुरू, अपडेट कीजिए।",
         "ack": "शुक्रिया। आपकी तस्दीक़ दर्ज कर ली गई है। ख़ुदा हाफ़िज़।",
@@ -98,6 +110,10 @@ LANGS = {
         "reassign_no": "धन्यवाद। यह अलर्ट दूसरे तकनीशियन को नहीं सौंपा जाएगा। अलविदा।",
         "reason_rejected": "ने असाइनमेंट अस्वीकार कर दिया है",
         "reason_no_ack": "ने {n} कॉल के बाद भी असाइनमेंट स्वीकार नहीं किया",
+        "emergency_technician": "{greet} यह टिकट नंबर {t} क्रिटिकल गंभीरता का है। कृपया तुरंत कार्रवाई करें। टिकट स्वीकार करने के लिए {ack} दबाएं। अस्वीकार करने के लिए {rej} दबाएं।",
+        "emergency_escalation": "{greet} यह टिकट {t} का इमरजेंसी एस्केलेशन है। तकनीशियन {name} {reason}। कृपया कार्रवाई करें या तकनीशियन से समीक्षा करने को कहें।",
+        "emergency_reason_no_answer": "ने कॉल का जवाब नहीं दिया",
+        "emergency_reason_rejected": "ने असाइनमेंट अस्वीकार कर दिया है",
         "reminder": "हेल्पडेस्क रिमाइंडर। टिकट {t}, साइट {s}, पर आपका स्टेटस अपडेट बाकी है। "
                     "कृपया नेक्स्ट टास्क में डिपार्टेड, अराइव्ड या स्टार्टेड अपडेट करें।",
         "ack": "धन्यवाद। आपकी स्वीकृति दर्ज कर ली गई है। अलविदा।",

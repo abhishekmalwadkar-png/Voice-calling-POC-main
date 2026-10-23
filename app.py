@@ -36,6 +36,9 @@ def _reload_modules():
             reloaded.append(mod.__name__)
         except Exception as e:
             reloaded.append(f"{mod.__name__} (error: {e})")
+    msg = f"Hot-reloaded modules: {', '.join(reloaded)}"
+    print(f"[{store.now_iso()}] - modules_reloaded: {msg}", flush=True)
+    store.audit(None, "modules_reloaded", msg)
     return reloaded
 
 
@@ -123,7 +126,7 @@ def emergency_call(form):
         recipients["technician"] = {
             "mobile": tech_mob or (recipients.get("technician") or {}).get("mobile", ""),
             "name": form.get("technician_name") or (recipients.get("technician") or {}).get("name", ""),
-            "language": form.get("technician_language") or (recipients.get("technician") or {}).get("language", default_lang),
+            "language": form.get("technician_language") or (recipients.get("technician") or {}).get("language") or "ask",
         }
 
     tl_mob = str(form.get("team_leader_number") or "").strip()

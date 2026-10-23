@@ -199,6 +199,19 @@ def _alarm_cleared(t):
     return (t["alarm_status"] or "").lower() in CFG["alarm_cleared_values"]
 
 
+def _is_emergency_ticket(t):
+    if not t:
+        return False
+    sev = str(t.get("severity") or "").lower()
+    uc1 = str(t.get("uc1_state") or "")
+    aid = str(t.get("assignment_id") or "")
+    alarm = str(t.get("alarm_id") or "")
+    return (sev in ("emergency", "critical") or
+            uc1.startswith("EMERGENCY") or
+            "-EMG" in aid or
+            "EMERGENCY" in alarm.upper())
+
+
 def _dispatch(t, previous, ev):
     kind, tid = ev["event_type"], t["ticket_id"]
     # Closure and alarm clearance override everything else (PDF p.4)
@@ -405,9 +418,18 @@ def _escalate(t, reason, tech_calls):
     audit(tid, "escalation_started", f"Escalation started: {reason} after {tech_calls} technician call(s)")
     notify(tid, "uc1.escalation_started", {"reason": reason, "technician_calls": tech_calls})
     r = t["recipients"]
+    tech_name = (r.get("technician") or {}).get("name") or "Technician"
+
+    # Send message to Team Leader and Manager upon escalation
+    for role in ("team_leader", "manager"):
+        rec_role = r.get(role)
+        if rec_role and rec_role.get("mobile"):
+            note = f"Technician: {tech_name} (Did not answer after {tech_calls} call attempts)" if reason != "rejected" else f"Technician: {tech_name} (Rejected assignment)"
+            send_whatsapp_alert(t, role, rec_role, alert_type_override="Emergency Escalation" if _is_emergency_ticket(t) else "Escalation", custom_note=note)
+
     if r.get("team_leader", {}).get("mobile"):
         return [f"escalation started ({reason})", _schedule(tid, t["assignment_id"], "tl_call", 1, 0)]
-    if r.get("manager", {}).get("mobile"):
+    if not _is_emergency_ticket(t) and r.get("manager", {}).get("mobile"):
         return [f"escalation started ({reason}), no team leader number",
                 _schedule(tid, t["assignment_id"], "manager_call", 1, 0)]
     return [f"escalation started ({reason})"] + _finish_uc1(tid, "ESCALATION_NO_CONTACTS")
@@ -502,7 +524,7 @@ def _place_call(t, role, attempt, workflow, send_wa=True):
     return cid
 
 
-def send_whatsapp_alert(t, role, rec, call_cid=None, alert_type_override=None):
+def send_whatsapp_alert(t, role, rec, call_cid=None, alert_type_override=None, custom_note=None, delay_sec=None):
     """Send WhatsApp alert to Team Leader or Manager."""
     if not rec or not rec.get("mobile"):
         return
@@ -510,11 +532,15 @@ def send_whatsapp_alert(t, role, rec, call_cid=None, alert_type_override=None):
     role_title = role.replace("_", " ").title()
     display_name = rec.get("name") or role_title
     tech_name = (t.get("recipients", {}).get("technician") or {}).get("name") or "Technician"
-    is_emergency = (alert_type_override == "Emergency" or
-                    str(t.get("severity") or "").lower() == "emergency" or
-                    str(t.get("uc1_state") or "") == "EMERGENCY_TRIGGERED")
+    is_emergency = (alert_type_override in ("Emergency", "Emergency Escalation") or
+                    _is_emergency_ticket(t))
     alert_type = alert_type_override or ("Emergency" if is_emergency else "Escalation")
-    tech_line = f"Technician: {tech_name}" if is_emergency else f"Technician: {tech_name} (Unanswered after technician calls)"
+    if custom_note:
+        tech_line = custom_note
+    elif is_emergency:
+        tech_line = f"Technician: {tech_name}"
+    else:
+        tech_line = f"Technician: {tech_name} (Unanswered after technician calls)"
     msg = (
         f"FLM {alert_type} Alert ({role_title})\n\n"
         f"Ticket: {tid}\n"
@@ -525,9 +551,11 @@ def send_whatsapp_alert(t, role, rec, call_cid=None, alert_type_override=None):
         f"Please review and take action."
     )
 
+    wait_time = delay_sec if delay_sec is not None else (2.0 if role == "manager" else 0.0)
+
     def _do_send():
-        if role == "manager":
-            time.sleep(1.5)
+        if wait_time > 0:
+            time.sleep(wait_time)
         try:
             status_code, resp_body = ae_whatsapp.send_whatsapp(rec["mobile"], msg)
             print(f"[whatsapp] whatsapp message send to {display_name} ({rec['mobile']}) - Status: {status_code}", flush=True)
@@ -561,6 +589,10 @@ def trigger_emergency(ticket_id, alarm_id, assignment_id, site_name, description
             if rv.get("mobile"):
                 merged[rk] = rv
 
+        # Ensure technician asks for language first if not explicitly set
+        if "technician" in merged and not merged["technician"].get("language"):
+            merged["technician"]["language"] = "ask"
+
         changes = {
             "alarm_id": alarm_id,
             "assignment_id": assignment_id,
@@ -585,17 +617,12 @@ def trigger_emergency(ticket_id, alarm_id, assignment_id, site_name, description
               f"Emergency workflow triggered for {ticket_id} at {site_name}. Severity: {severity}")
 
         calls_placed = {}
-        # 1. Voice call to technician (up to 2 attempts via retry)
+        # 1. Voice call ONLY to technician (attempt 1; attempt 2 happens on retry if not picked up)
         if (merged.get("technician") or {}).get("mobile"):
             cid = _place_call(t, "technician", 1, "uc1_technician")
             calls_placed["technician"] = cid
 
-        # 2. Voice call to team leader (1 attempt)
-        if (merged.get("team_leader") or {}).get("mobile"):
-            cid = _place_call(t, "team_leader", 1, "uc1_escalation", send_wa=False)
-            calls_placed["team_leader"] = cid
-
-        # 3. WhatsApp alerts to Team Leader and Manager (1 message each)
+        # 2. WhatsApp alerts to Team Leader and Manager (1 message each)
         wa_recipients = []
         for role in ("team_leader", "manager"):
             rec_role = merged.get(role)
@@ -658,8 +685,10 @@ def twiml_voice(cid, retry):
         return _menu(cid, 0)
     t = get_ticket(c["ticket_id"])
     purpose = WORKFLOW_PURPOSE[c["workflow"]]
+    is_emergency = _is_emergency_ticket(t)
     if purpose == "technician":
-        prompt = texts.voice_text(lang, "technician", t, ack=t["ack_digit"], rej=t["reject_digit"],
+        prompt_key = "emergency_technician" if is_emergency else "technician"
+        prompt = texts.voice_text(lang, prompt_key, t, ack=t["ack_digit"], rej=t["reject_digit"],
                                   greet=texts.greeting(lang, c["recipient_name"]))
         gather = (f'<Gather input="dtmf" numDigits="1" timeout="8" method="POST" '
                   f'action="/twilio/gather?cid={cid}&amp;r={retry}">{texts.say(lang, prompt)}</Gather>')
@@ -670,11 +699,19 @@ def twiml_voice(cid, retry):
     if purpose == "escalation":
         # Answering counts as reached; the reassign question records a yes/no decision on top
         tech = t["recipients"].get("technician", {})
-        reason_key = "reason_rejected" if t["esc_reason"] == "rejected" else "reason_no_ack"
-        reason = texts.LANGS[lang][reason_key].format(n=t["esc_detail"] or "")
-        text = (texts.voice_text(lang, "escalation", t, name=tech.get("name", ""), reason=reason,
-                                 greet=texts.greeting(lang, c["recipient_name"])) + " "
-                + texts.LANGS[lang]["escalation_question"].format(ack=t["ack_digit"], rej=t["reject_digit"]))
+        tech_name = tech.get("name") or "the technician"
+        if is_emergency:
+            reason_key = "emergency_reason_rejected" if t.get("esc_reason") == "rejected" else "emergency_reason_no_answer"
+            reason = texts.LANGS[lang].get(reason_key, "did not answer the call")
+            text = (texts.voice_text(lang, "emergency_escalation", t, name=tech_name, reason=reason,
+                                     greet=texts.greeting(lang, c["recipient_name"])) + " "
+                    + texts.LANGS[lang]["escalation_question"].format(ack=t["ack_digit"], rej=t["reject_digit"]))
+        else:
+            reason_key = "reason_rejected" if t.get("esc_reason") == "rejected" else "reason_no_ack"
+            reason = texts.LANGS[lang][reason_key].format(n=t.get("esc_detail") or "")
+            text = (texts.voice_text(lang, "escalation", t, name=tech_name, reason=reason,
+                                     greet=texts.greeting(lang, c["recipient_name"])) + " "
+                    + texts.LANGS[lang]["escalation_question"].format(ack=t["ack_digit"], rej=t["reject_digit"]))
         if c["outcome"] not in ("reassign_yes", "reassign_no"):
             update_call(cid, outcome="reached")
         gather = (f'<Gather input="dtmf" numDigits="1" timeout="8" method="POST" '
@@ -807,22 +844,26 @@ def finish_call(cid):
 
 def _after_technician_call(t, c, outcome):
     tid, n = t["ticket_id"], c["attempt_no"]
-    if t["uc1_state"] not in TECH_ACTIVE:
+    if t["uc1_state"] not in TECH_ACTIVE and not _is_emergency_ticket(t):
         return
     if outcome == "acknowledged":
         _mark_acknowledged(t, "voice", call_cid=c["id"])
         return
 
-    is_emergency = (str(t.get("severity") or "").lower() == "emergency" or
-                    str(t.get("uc1_state") or "") == "EMERGENCY_TRIGGERED")
+    is_emergency = _is_emergency_ticket(t)
     if is_emergency:
-        # Emergency: strictly 1 call to technician (no retry). Team Leader was dialed in parallel.
-        tl_pending = q("SELECT COUNT(*) AS c FROM jobs WHERE ticket_id=? AND kind='tl_call' AND status='pending'", (tid,), one=True)["c"]
-        tl_active = q("SELECT COUNT(*) AS c FROM calls WHERE ticket_id=? AND role='team_leader' AND processed=0", (tid,), one=True)["c"]
-        if tl_pending == 0 and tl_active == 0:
-            if t["uc1_state"] == "EMERGENCY_TRIGGERED":
-                _finish_uc1(tid, "ESCALATION_UNRESOLVED")
-        return
+        if outcome == "rejected":
+            _escalate(t, "rejected", n)
+            return
+        if n < 2:
+            update_ticket(tid, uc1_state="TECH_WAITING_RETRY")
+            audit(tid, "emergency_tech_retry", f"Technician did not answer emergency call #{n} ({outcome}). Retrying attempt #2.")
+            _schedule(tid, t["assignment_id"], "tech_call", n + 1, CFG["tech_retry_sec"])
+            return
+        else:
+            audit(tid, "emergency_tech_escalate", f"Technician did not answer emergency call after {n} attempt(s). Escalating to Team Leader.")
+            _escalate(t, "no_acknowledgement", n)
+            return
 
     if outcome == "rejected":
         _escalate(t, "rejected", n)
@@ -842,8 +883,7 @@ def _after_escalation_call(t, c, outcome):
     if outcome in ("reassign_yes", "reassign_no"):
         _finish_uc1(tid, "TL_REACHED" if role == "team_leader" else "MANAGER_REACHED")
         return
-    is_emergency = (str(t.get("severity") or "").lower() == "emergency" or
-                    str(t.get("uc1_state") or "") == "EMERGENCY_TRIGGERED")
+    is_emergency = _is_emergency_ticket(t)
     if is_emergency:
         # Emergency: Team Leader gets a 2nd call attempt if they do not pick up attempt 1. Never call Manager.
         if role == "team_leader" and n < 2:
@@ -852,8 +892,7 @@ def _after_escalation_call(t, c, outcome):
 
         tech_active = q("SELECT COUNT(*) AS c FROM calls WHERE ticket_id=? AND role='technician' AND processed=0", (tid,), one=True)["c"]
         if tech_active == 0:
-            if t["uc1_state"] == "EMERGENCY_TRIGGERED":
-                _finish_uc1(tid, "ESCALATION_UNRESOLVED")
+            _finish_uc1(tid, "ESCALATION_UNRESOLVED")
         return
     has_manager = bool(t["recipients"].get("manager", {}).get("mobile"))
     if role == "team_leader" and n < CFG["tl_max_attempts"]:
