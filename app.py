@@ -112,10 +112,19 @@ def emergency_call(form):
     aid = ticket_data.get("assignment_id") or form.get("assignment_id") or f"{tid}-EMG{stamp}"
 
     recipients = {}
-    if isinstance(form.get("recipients"), list):
-        for r in form["recipients"]:
+    raw_recipients = form.get("recipients")
+    if isinstance(raw_recipients, list):
+        for r in raw_recipients:
             if isinstance(r, dict) and r.get("role"):
                 recipients[r["role"]] = {
+                    "mobile": str(r.get("mobile") or "").strip(),
+                    "name": r.get("name") or "",
+                    "language": r.get("language") or default_lang,
+                }
+    elif isinstance(raw_recipients, dict):
+        for role, r in raw_recipients.items():
+            if isinstance(r, dict):
+                recipients[role] = {
                     "mobile": str(r.get("mobile") or "").strip(),
                     "name": r.get("name") or "",
                     "language": r.get("language") or default_lang,
