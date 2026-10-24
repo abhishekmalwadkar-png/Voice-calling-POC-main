@@ -741,9 +741,9 @@ def trigger_emergency_close(ticket_id, resolution=None, closed_at=None, recipien
         audit(ticket_id, "emergency_closed",
               f"Emergency ticket {ticket_id} closed at {close_time}. Resolution: {res}")
 
-        # Send WhatsApp closure alerts to Team Leader and Manager
+        # Send WhatsApp closure alerts to Technician, Team Leader, and Manager
         wa_recipients = []
-        target_roles = [r for r in ("team_leader", "manager") if r in merged and merged[r].get("mobile")]
+        target_roles = [r for r in ("technician", "team_leader", "manager") if r in merged and merged[r].get("mobile")]
         for idx, role in enumerate(target_roles):
             rec_role = merged[role]
             send_whatsapp_closure(t, role, rec_role, resolution=res, closed_at=close_time, delay_sec=idx * 2.0)

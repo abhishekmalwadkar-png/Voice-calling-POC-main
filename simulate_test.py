@@ -695,10 +695,10 @@ code, close_res = http("POST", "/api/emergency_close", {
 })
 assert code == 200 and close_res["result"] == "emergency_closed", close_res
 assert close_res["status"] == "Closed"
-assert len(close_res["whatsapp_notifications"]) == 2
+assert len(close_res["whatsapp_notifications"]) == 3
 t_closed = store.get_ticket("EMG1")
 assert t_closed["status"] == "Closed" and t_closed["uc1_state"] == "CANCELLED_CLOSED"
-ok("emergency close API: /api/emergency_close closes ticket and sends closure WhatsApp to TL and Manager")
+ok("emergency close API: /api/emergency_close closes ticket and sends closure WhatsApp to Technician, TL and Manager")
 
 scheduler.stopped.set()
 server.shutdown()

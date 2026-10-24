@@ -236,10 +236,15 @@ def emergency_close_call(form):
 
     for role, key in (("team_leader", "team_leader_number"), ("manager", "manager_number"), ("technician", "technician_number")):
         mob = str(form.get(key) or form.get(f"{role}_mobile") or "").strip()
+        if role == "technician" and not mob:
+            mob = str(form.get("engineer_mobile") or form.get("phone_number") or "").strip()
         if mob:
+            name = form.get(f"{role}_name")
+            if role == "technician" and not name:
+                name = form.get("engineer_name")
             recipients[role] = {
                 "mobile": mob,
-                "name": form.get(f"{role}_name") or (recipients.get(role) or {}).get("name", ""),
+                "name": name or (recipients.get(role) or {}).get("name", ""),
             }
 
     return workflow.trigger_emergency_close(
