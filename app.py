@@ -434,7 +434,12 @@ class Handler(BaseHTTPRequestHandler):
         if path.startswith("/api/"):
             if CFG["api_key"]:
                 query_key = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query).get("key", [""])[0]
-                return self.headers.get("X-API-Key") == CFG["api_key"] or (bool(query_key) and query_key == CFG["api_key"])
+                sent_key = (self.headers.get("X-API-Key") or
+                            self.headers.get("x_api_key") or
+                            self.headers.get("api_key") or
+                            self.headers.get("apikey") or
+                            query_key)
+                return sent_key == CFG["api_key"]
             return self._from_this_pc()
         return self._from_this_pc()  # dashboard and its call form: this PC only
 
