@@ -41,6 +41,7 @@ NOT_PICKED_UP = {"not_picked_up", "busy_or_declined", "call_failed", "canceled",
 RESPONSE_TEXT = {
     "acknowledged": "acknowledged the assignment",
     "rejected": "rejected the assignment",
+    "informed": "informed of emergency assignment",
     "reached": "picked up but did not press 1 or 9 (counted as no response)",
     "reassign_yes": "answered: yes, assign the alert to another technician",
     "reassign_no": "answered: no, do not assign the alert to another technician",
@@ -801,8 +802,13 @@ def twiml_voice(cid, retry):
     purpose = WORKFLOW_PURPOSE[c["workflow"]]
     is_emergency = _is_emergency_ticket(t)
     if purpose == "technician":
-        prompt_key = "emergency_technician" if is_emergency else "technician"
-        prompt = texts.voice_text(lang, prompt_key, t, ack=t["ack_digit"], rej=t["reject_digit"],
+        if is_emergency:
+            prompt = texts.voice_text(lang, "emergency_technician", t,
+                                      greet=texts.greeting(lang, c["recipient_name"]))
+            update_call(cid, outcome="informed")
+            goodbye = texts.LANGS[lang]["goodbye"]
+            return _twiml(texts.say(lang, prompt) + '<Pause length="1"/>' + texts.say(lang, prompt) + texts.say(lang, goodbye) + "<Hangup/>")
+        prompt = texts.voice_text(lang, "technician", t, ack=t["ack_digit"], rej=t["reject_digit"],
                                   greet=texts.greeting(lang, c["recipient_name"]))
         gather = (f'<Gather input="dtmf" numDigits="1" timeout="8" method="POST" '
                   f'action="/twilio/gather?cid={cid}&amp;r={retry}">{texts.say(lang, prompt)}</Gather>')
@@ -960,7 +966,7 @@ def _after_technician_call(t, c, outcome):
     tid, n = t["ticket_id"], c["attempt_no"]
     if t["uc1_state"] not in TECH_ACTIVE and not _is_emergency_ticket(t):
         return
-    if outcome == "acknowledged":
+    if outcome in ("acknowledged", "informed"):
         _mark_acknowledged(t, "voice", call_cid=c["id"])
         return
 
