@@ -178,12 +178,14 @@ def emergency_close_call(form):
         raise workflow.EventError("body must be a JSON object")
 
     ticket_data = form.get("ticket") if isinstance(form.get("ticket"), dict) else {}
-    tid = str(ticket_data.get("ticket_id") or form.get("ticket_id") or "").strip().upper()
+    tid = str(ticket_data.get("ticket_id") or form.get("ticket_id") or form.get("incident_number") or "").strip().upper()
     if not tid:
-        raise workflow.EventError("missing required field: ticket_id")
+        raise workflow.EventError("missing required field: ticket_id or incident_number")
 
     site = ticket_data.get("site_name") or form.get("site_details") or form.get("site_name")
-    res = form.get("resolution") or form.get("resolution_notes") or ticket_data.get("resolution") or "Emergency issue resolved and service restored."
+    res = (form.get("resolution") or form.get("resolution_notes") or ticket_data.get("resolution")
+           or form.get("close_notes") or form.get("fault_type") or form.get("short_description")
+           or "Emergency issue resolved and service restored.")
     closed_at = form.get("closed_at") or form.get("closure_time") or store.now_iso()
 
     recipients = {}
@@ -204,7 +206,7 @@ def emergency_close_call(form):
                 }
 
     for role, key in (("team_leader", "team_leader_number"), ("manager", "manager_number"), ("technician", "technician_number")):
-        mob = str(form.get(key) or "").strip()
+        mob = str(form.get(key) or form.get(f"{role}_mobile") or "").strip()
         if mob:
             recipients[role] = {
                 "mobile": mob,
