@@ -170,6 +170,56 @@ def emergency_call(form):
     )
 
 
+def emergency_close_call(form):
+    """POST /api/emergency_close, /api/emergency/close, or /api/emergency_closure
+    Closes an emergency ticket and sends closure WhatsApp alert messages to Team Leader and Manager.
+    """
+    if not isinstance(form, dict):
+        raise workflow.EventError("body must be a JSON object")
+
+    ticket_data = form.get("ticket") if isinstance(form.get("ticket"), dict) else {}
+    tid = str(ticket_data.get("ticket_id") or form.get("ticket_id") or "").strip().upper()
+    if not tid:
+        raise workflow.EventError("missing required field: ticket_id")
+
+    site = ticket_data.get("site_name") or form.get("site_details") or form.get("site_name")
+    res = form.get("resolution") or form.get("resolution_notes") or ticket_data.get("resolution") or "Emergency issue resolved and service restored."
+    closed_at = form.get("closed_at") or form.get("closure_time") or store.now_iso()
+
+    recipients = {}
+    raw_recipients = form.get("recipients")
+    if isinstance(raw_recipients, list):
+        for r in raw_recipients:
+            if isinstance(r, dict) and r.get("role") and r.get("mobile"):
+                recipients[r["role"]] = {
+                    "mobile": str(r.get("mobile")).strip(),
+                    "name": r.get("name") or "",
+                }
+    elif isinstance(raw_recipients, dict):
+        for role, r in raw_recipients.items():
+            if isinstance(r, dict) and r.get("mobile"):
+                recipients[role] = {
+                    "mobile": str(r.get("mobile")).strip(),
+                    "name": r.get("name") or "",
+                }
+
+    for role, key in (("team_leader", "team_leader_number"), ("manager", "manager_number"), ("technician", "technician_number")):
+        mob = str(form.get(key) or "").strip()
+        if mob:
+            recipients[role] = {
+                "mobile": mob,
+                "name": form.get(f"{role}_name") or (recipients.get(role) or {}).get("name", ""),
+            }
+
+    return workflow.trigger_emergency_close(
+        ticket_id=tid,
+        resolution=res,
+        closed_at=closed_at,
+        recipients_override=recipients,
+        site_name=site
+    )
+
+
 def legacy_view(tid):
     v = workflow.ticket_view(tid)
     if not v:
@@ -443,6 +493,9 @@ class Handler(BaseHTTPRequestHandler):
                     aid = (t and t.get("assignment_id")) or body.get("assignment_id")
                     return self._json_waiting(tid, lambda: _wait(tid, aid, options, body))
                 return self._json(code, body)
+            if path in ("/api/emergency_close", "/api/emergency/close", "/api/emergency_closure"):
+                code, body = emergency_close_call(form)
+                return self._json(code, body)
             if path == "/api/call":
                 options = _wait_options(params) if _wants_wait(params) else None
                 code, body = legacy_call(form)
@@ -515,6 +568,7 @@ def main():
     print(f"Dashboard        : http://localhost:{CFG['port']}  (this PC only)")
     print(f"Event API        : POST {base}/api/events")
     print(f"Emergency API    : POST {base}/api/emergency_api")
+    print(f"Emergency Close  : POST {base}/api/emergency_close")
     print(f"Follow-up API    : POST {base}/api/tickets/<ticket_id>/followup")
     print(f"Status API       : GET  {base}/api/tickets/<ticket_id>")
     print(f"Reload API       : GET/POST {base}/api/reload")

@@ -686,6 +686,20 @@ code, emg_wait = http("POST", "/api/emergency_api?wait=true&timeout=1", {
 assert code == 200 and emg_wait["timed_out"] is True and emg_wait["call_result"] == "pending", emg_wait
 ok("emergency API: ?wait=true&until=final&timeout=... works synchronously")
 
+# Emergency Close API
+code, close_res = http("POST", "/api/emergency_close", {
+    "ticket_id": "EMG1",
+    "resolution": "Generator repaired, main power restored",
+    "team_leader_number": "+912222222222",
+    "manager_number": "+913333333333"
+})
+assert code == 200 and close_res["result"] == "emergency_closed", close_res
+assert close_res["status"] == "Closed"
+assert len(close_res["whatsapp_notifications"]) == 2
+t_closed = store.get_ticket("EMG1")
+assert t_closed["status"] == "Closed" and t_closed["uc1_state"] == "CANCELLED_CLOSED"
+ok("emergency close API: /api/emergency_close closes ticket and sends closure WhatsApp to TL and Manager")
+
 scheduler.stopped.set()
 server.shutdown()
 print(f"\nALL {len(PASSED)} TESTS PASSED")

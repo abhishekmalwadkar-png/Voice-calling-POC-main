@@ -570,6 +570,44 @@ def send_whatsapp_alert(t, role, rec, call_cid=None, alert_type_override=None, c
     ).start()
 
 
+def send_whatsapp_closure(t, role, rec, resolution=None, closed_at=None, delay_sec=None):
+    """Send Emergency Closure WhatsApp notification to Team Leader, Manager, or Technician."""
+    if not rec or not rec.get("mobile"):
+        return
+    tid = t["ticket_id"]
+    role_title = role.replace("_", " ").title()
+    display_name = rec.get("name") or role_title
+    res = resolution or "Emergency issue resolved and service restored."
+    close_time = closed_at or now_iso()
+    msg = (
+        f"FLM Emergency Closure Alert ({role_title})\n\n"
+        f"Ticket: {tid}\n"
+        f"Site: {t.get('site_name') or 'N/A'}\n"
+        f"Severity: Emergency\n"
+        f"Status: Closed\n"
+        f"Closed At: {close_time}\n"
+        f"Resolution: {res}\n\n"
+        f"The emergency ticket has been closed. No further action is required."
+    )
+    wait_time = delay_sec if delay_sec is not None else (2.0 if role == "manager" else 0.0)
+
+    def _do_send():
+        if wait_time > 0:
+            time.sleep(wait_time)
+        try:
+            status_code, resp_body = ae_whatsapp.send_whatsapp(rec["mobile"], msg)
+            print(f"[whatsapp] whatsapp closure message send to {display_name} ({rec['mobile']}) - Status: {status_code}", flush=True)
+            audit(tid, "whatsapp_sent", f"{role_title} emergency closure WhatsApp message sent to {display_name} ({rec['mobile']})")
+        except Exception as ex:  # noqa: BLE001
+            print(f"[whatsapp] Failed to send whatsapp closure message to {display_name} ({rec['mobile']}): {ex}", flush=True)
+            audit(tid, "whatsapp_error", f"Could not send closure WhatsApp to {role_title} ({display_name}): {ex}")
+
+    threading.Thread(
+        target=_do_send,
+        daemon=True
+    ).start()
+
+
 def trigger_emergency(ticket_id, alarm_id, assignment_id, site_name, description, severity,
                       recipients, callback_url=None, ack_digit="1", reject_digit="9"):
     """Emergency workflow:
@@ -655,6 +693,82 @@ def trigger_emergency(ticket_id, alarm_id, assignment_id, site_name, description
             "calls_placed": calls_placed,
             "whatsapp_notifications": wa_recipients,
             "callback_url": t.get("callback_url"),
+            "status_url": f"/api/tickets/{ticket_id}"
+        }
+
+
+def trigger_emergency_close(ticket_id, resolution=None, closed_at=None, recipients_override=None, site_name=None):
+    """Emergency Closure workflow:
+    1. Cancels active/pending calls and timers for this ticket.
+    2. Marks ticket Closed in the database with closure timestamp.
+    3. Sends Emergency Closure WhatsApp notification to Team Leader and Manager.
+    4. Records audit trail and notifies callback_url.
+    """
+    with ticket_lock(ticket_id):
+        t = get_ticket(ticket_id)
+        close_time = closed_at or now_iso()
+        res = resolution or "Emergency issue resolved and service restored."
+
+        if not t:
+            q("INSERT INTO tickets (ticket_id, recipients, created_at, updated_at) VALUES (?,?,?,?)",
+              (ticket_id, "{}", now_iso(), now_iso()))
+            t = get_ticket(ticket_id)
+
+        merged = dict(t.get("recipients") or {})
+        if recipients_override and isinstance(recipients_override, dict):
+            for rk, rv in recipients_override.items():
+                if isinstance(rv, dict) and rv.get("mobile"):
+                    merged[rk] = rv
+
+        changes = {
+            "status": "Closed",
+            "uc1_state": "CANCELLED_CLOSED",
+            "followup_state": "STOPPED_CLOSED",
+            "recipients": merged,
+            "updated_at": now_iso()
+        }
+        if site_name:
+            changes["site_name"] = site_name
+        if resolution:
+            orig_desc = t.get("description") or ""
+            changes["description"] = f"{orig_desc} [Closed: {res}]".strip() if orig_desc else res
+
+        update_ticket(ticket_id, **changes)
+        _cancel_jobs(ticket_id, ("tech_call", "tl_call", "manager_call", "followup"), "emergency ticket closed")
+        _end_live_calls(ticket_id, "emergency ticket closed")
+        t = get_ticket(ticket_id)
+
+        audit(ticket_id, "emergency_closed",
+              f"Emergency ticket {ticket_id} closed at {close_time}. Resolution: {res}")
+
+        # Send WhatsApp closure alerts to Team Leader and Manager
+        wa_recipients = []
+        target_roles = [r for r in ("team_leader", "manager") if r in merged and merged[r].get("mobile")]
+        for idx, role in enumerate(target_roles):
+            rec_role = merged[role]
+            send_whatsapp_closure(t, role, rec_role, resolution=res, closed_at=close_time, delay_sec=idx * 2.0)
+            wa_recipients.append({
+                "role": role,
+                "name": rec_role.get("name") or role.replace("_", " ").title(),
+                "mobile": rec_role["mobile"],
+            })
+
+        if t.get("callback_url"):
+            notify(ticket_id, "emergency.closed", {
+                "ticket_id": ticket_id,
+                "status": "Closed",
+                "closed_at": close_time,
+                "resolution": res,
+                "whatsapp_notifications": wa_recipients
+            })
+
+        return 200, {
+            "ticket_id": ticket_id,
+            "result": "emergency_closed",
+            "status": "Closed",
+            "closed_at": close_time,
+            "resolution": res,
+            "whatsapp_notifications": wa_recipients,
             "status_url": f"/api/tickets/{ticket_id}"
         }
 
