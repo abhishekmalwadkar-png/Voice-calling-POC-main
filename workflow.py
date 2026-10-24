@@ -1163,7 +1163,7 @@ def notify(tid, event, data):
     """POST a signed notification to the ticket's callback_url (or RESULT_WEBHOOK_URL). Fire-and-forget."""
     t = get_ticket(tid)
     url = (t and t["callback_url"]) or CFG["webhook_url"]
-    if not url:
+    if not url or not (str(url).startswith("http://") or str(url).startswith("https://")):
         return
     body = json.dumps({"event": event, "ticket_id": tid, "sent_at": now_iso(), "data": data,
                        "ticket": ticket_view(tid)}, ensure_ascii=False).encode()
