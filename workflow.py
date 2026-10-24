@@ -207,7 +207,7 @@ def _is_emergency_ticket(t):
     uc1 = str(t.get("uc1_state") or "")
     aid = str(t.get("assignment_id") or "")
     alarm = str(t.get("alarm_id") or "")
-    return (sev in ("emergency", "critical") or
+    return (sev == "emergency" or
             uc1.startswith("EMERGENCY") or
             "-EMG" in aid or
             "EMERGENCY" in alarm.upper())
