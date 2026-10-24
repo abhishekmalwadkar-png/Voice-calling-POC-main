@@ -22,13 +22,15 @@ import queries
 import store
 import texts
 import twilio_client
+import config
 import workflow
 from config import CFG
 
 
 def _reload_modules():
     """Hot-reload modified modules into memory without restarting the server or tunnel."""
-    modules = [texts, ae_whatsapp, queries, workflow]
+    config.load_env(override=True)
+    modules = [config, texts, ae_whatsapp, queries, workflow]
     reloaded = []
     for mod in modules:
         try:

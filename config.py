@@ -4,7 +4,7 @@ import os
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
 
-def load_env(path=os.path.join(BASE_DIR, ".env")):
+def load_env(path=os.path.join(BASE_DIR, ".env"), override=False):
     if not os.path.exists(path):
         return
     with open(path, encoding="utf-8") as f:
@@ -13,7 +13,9 @@ def load_env(path=os.path.join(BASE_DIR, ".env")):
             if not line or line.startswith("#") or "=" not in line:
                 continue
             key, value = line.split("=", 1)
-            os.environ.setdefault(key.strip(), value.strip())
+            k, v = key.strip(), value.strip()
+            if override or k not in os.environ:
+                os.environ[k] = v
 
 
 load_env()
