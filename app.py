@@ -25,6 +25,35 @@ import twilio_client
 import config
 import workflow
 from config import CFG
+import os
+import sys
+
+LOG_FILE_PATH = os.path.join(config.BASE_DIR, "server.log")
+
+class _TeeStream:
+    def __init__(self, original, file_path):
+        self.original = original
+        self.file_path = file_path
+        self._lock = threading.Lock()
+
+    def write(self, data):
+        self.original.write(data)
+        if not data:
+            return
+        with self._lock:
+            try:
+                with open(self.file_path, "a", encoding="utf-8") as f:
+                    f.write(data)
+            except Exception:
+                pass
+
+    def flush(self):
+        self.original.flush()
+
+if not isinstance(sys.stdout, _TeeStream):
+    sys.stdout = _TeeStream(sys.stdout, LOG_FILE_PATH)
+if not isinstance(sys.stderr, _TeeStream):
+    sys.stderr = _TeeStream(sys.stderr, LOG_FILE_PATH)
 
 
 def _reload_modules():
@@ -267,7 +296,7 @@ input,select{{padding:6px;font:inherit}} button{{background:#f58220;color:#fff;b
 .card{{background:#fff;border-radius:8px;padding:12px 16px;margin-top:12px}} .hd{{display:flex;gap:8px;flex-wrap:wrap;align-items:center}}
 .st{{margin-left:auto;padding:2px 8px;border-radius:10px;font-size:12px}} .ok{{background:#d8f3e0;color:#17643a}}
 .bad{{background:#fde0e0;color:#9b1c1c}} .run{{background:#e5ecfb;color:#1d4ed8}} .sub{{color:#556;font-size:12px;margin-top:4px}}
-ul{{margin:8px 0;padding-left:18px}} small{{color:#889}}</style></head><body><header><b>FLM Helpdesk · Voice call platform</b><br>
+ul{{margin:8px 0;padding-left:18px}} small{{color:#889}} .dl-btn{{background:#0b3a75;border:1px solid #fff;color:#fff;padding:4px 10px;border-radius:4px;text-decoration:none;font-size:12px;float:right}}</style></head><body><header><a href="/api/logs/download" class="dl-btn" download>📥 Download Log File</a><b>FLM Helpdesk · Voice call platform</b><br>
 <small style=color:#cdd>{mode} · technician attempts {CFG['tech_max_attempts']} · reject key {CFG['default_reject_digit']}</small></header><main>
 <form method=post action=/trigger>
 <label>Alert ID<input name=alert_id value="ALM1001" size=9></label>
@@ -445,6 +474,22 @@ class Handler(BaseHTTPRequestHandler):
             if path == "/api/audit/export":
                 ctype, body, name = queries.export(params)
                 return self._send(200, body, ctype, {"Content-Disposition": f'attachment; filename="{name}"'})
+            if path in ("/api/logs/download", "/api/logs"):
+                log_data = ""
+                if os.path.exists(LOG_FILE_PATH):
+                    try:
+                        with open(LOG_FILE_PATH, "r", encoding="utf-8", errors="replace") as f:
+                            log_data = f.read()
+                    except Exception as ex:
+                        log_data = f"Error reading server.log: {ex}\n"
+                if not log_data.strip():
+                    rows = store.q("SELECT ts, ticket_id, kind, message FROM audit_log ORDER BY id DESC LIMIT 5000")
+                    lines = [f"[{r['ts']}] {r['ticket_id'] or '-'} {r['kind']}: {r['message']}" for r in reversed(rows)]
+                    log_data = "\n".join(lines)
+                today = store.now_iso()[:10]
+                return self._send(200, log_data, "text/plain; charset=utf-8", {
+                    "Content-Disposition": f'attachment; filename="flm_voice_server_{today}.log"'
+                })
             if path.startswith("/api/call/"):
                 v = legacy_view(urllib.parse.unquote(path[len("/api/call/"):]).upper())
                 return self._json(200, v) if v else self._json(404, {"error": "ticket not found"})
