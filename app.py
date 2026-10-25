@@ -594,7 +594,11 @@ class Server(ThreadingHTTPServer):
 
 
 def start_cloudflared(port):
-    proc = subprocess.Popen(["cloudflared", "tunnel", "--url", f"http://localhost:{port}"],
+    exe = "cloudflared"
+    local_cf = os.path.join(os.path.dirname(__file__), "cloudflared.exe")
+    if os.path.exists(local_cf):
+        exe = local_cf
+    proc = subprocess.Popen([exe, "tunnel", "--url", f"http://localhost:{port}"],
                             stderr=subprocess.PIPE, stdout=subprocess.DEVNULL, text=True)
     deadline = time.time() + 40
     while time.time() < deadline:
