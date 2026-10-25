@@ -542,12 +542,13 @@ def send_whatsapp_alert(t, role, rec, call_cid=None, alert_type_override=None, c
         tech_line = f"Technician: {tech_name}"
     else:
         tech_line = f"Technician: {tech_name} (Unanswered after technician calls)"
+    desc = str(t.get('description') or 'N/A').replace('\\n', '\n').strip()
     msg = (
         f"FLM {alert_type} Alert ({role_title})\n\n"
         f"Ticket: {tid}\n"
         f"Site: {t.get('site_name') or 'N/A'}\n"
         f"Severity: {t.get('severity') or ('Emergency' if is_emergency else 'Critical')}\n"
-        f"Issue: {t.get('description') or 'N/A'}\n"
+        f"Issue: {desc}\n"
         f"{tech_line}\n\n"
         f"Please review and take action."
     )
@@ -578,7 +579,7 @@ def send_whatsapp_closure(t, role, rec, resolution=None, closed_at=None, delay_s
     tid = t["ticket_id"]
     role_title = role.replace("_", " ").title()
     display_name = rec.get("name") or role_title
-    res = resolution or "Emergency issue resolved and service restored."
+    res = str(resolution or "Emergency issue resolved and service restored.").replace('\\n', '\n').strip()
     close_time = closed_at or now_iso()
     msg = (
         f"FLM Emergency Closure Alert ({role_title})\n\n"

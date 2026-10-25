@@ -34,6 +34,8 @@ def send_whatsapp(phone_number, message, timeout=15):
     if len(clean_number) == 10:
         clean_number = "91" + clean_number
 
+    clean_message = str(message).replace("\\n", "\n").replace("\r\n", "\n")
+
     payload = {
         "additionalInfo": {
             "auth_header": f"Bearer {token}"
@@ -47,7 +49,7 @@ def send_whatsapp(phone_number, message, timeout=15):
                 "trigger_aistudio_dialog": {
                     "dialog_id": "notification",
                     "params": {
-                        "message": str(message)
+                        "message": clean_message
                     }
                 }
             }
