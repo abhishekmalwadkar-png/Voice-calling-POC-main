@@ -108,7 +108,8 @@ def legacy_call(form):
     event = {
         "event_id": f"CALL-{tid}-{stamp}", "event_type": "ASSIGNMENT_CREATED",
         "ticket": {"ticket_id": tid, "alarm_id": form["alert_id"], "assignment_id": f"{tid}-A{stamp}",
-                   "site_name": form["site_details"], "description": form.get("description"), "status": "Assigned"},
+                   "site_name": form["site_details"], "description": form.get("description"),
+                   "severity": form.get("severity") or "Major", "status": "Assigned"},
         "ack_digit": form.get("ack_digit") or "1", "reject_digit": form.get("reject_digit"),
         "callback_url": form.get("callback_url"), "recipients": recipients,
     }
