@@ -584,6 +584,8 @@ class Handler(BaseHTTPRequestHandler):
                 return self._send(200, workflow.twiml_lang(cid, retry, form.get("Digits", "")), "text/xml")
             if path == "/twilio/gather":
                 return self._send(200, workflow.twiml_gather(cid, retry, form.get("Digits", "")), "text/xml")
+            if path == "/twilio/reject_reason":
+                return self._send(200, workflow.twiml_reject_reason(cid, form.get("Digits", "")), "text/xml")
             if path == "/twilio/call-status":
                 workflow.call_status(cid, form)
                 return self._send(204, "")

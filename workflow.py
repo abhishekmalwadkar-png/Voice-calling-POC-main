@@ -57,6 +57,12 @@ RESPONSE_TEXT = {
 }
 WORKFLOW_PURPOSE = {"uc1_technician": "technician", "uc1_escalation": "escalation", "uc1_reminder": "reminder"}
 WEBHOOK_DELAYS = (0, 5, 15, 30)
+REJECT_REASONS = {
+    "1": "Busy on another site",
+    "2": "On leave / Off duty",
+    "3": "Equipment or transport issue",
+    "4": "Other / Personal reasons",
+}
 
 
 class EventError(ValueError):
@@ -425,7 +431,11 @@ def _escalate(t, reason, tech_calls):
     for role in ("team_leader", "manager"):
         rec_role = r.get(role)
         if rec_role and rec_role.get("mobile"):
-            note = f"Technician: {tech_name} (Did not answer after {tech_calls} call attempts)" if reason != "rejected" else f"Technician: {tech_name} (Rejected assignment)"
+            if reason == "rejected":
+                rej_r = t.get("uc1_reject_reason")
+                note = f"Technician: {tech_name} (Declined - Reason: {rej_r})" if rej_r else f"Technician: {tech_name} (Rejected assignment)"
+            else:
+                note = f"Technician: {tech_name} (Did not answer after {tech_calls} call attempts)"
             send_whatsapp_alert(t, role, rec_role, alert_type_override="Emergency Escalation" if _is_emergency_ticket(t) else "Escalation", custom_note=note)
 
     if r.get("team_leader", {}).get("mobile"):
@@ -894,13 +904,33 @@ def twiml_gather(cid, retry, digits):
             return _twiml(texts.say(lang, texts.LANGS[lang]["ack"]) + "<Hangup/>")
         if digits == t["reject_digit"]:
             update_call(cid, outcome="rejected", ack_result="rejected")
-            return _twiml(texts.say(lang, texts.LANGS[lang]["reject"]) + "<Hangup/>")
+            prompt = texts.LANGS[lang].get("reject_reason_prompt") or texts.LANGS["en"]["reject_reason_prompt"]
+            gather = (f'<Gather input="dtmf" numDigits="1" timeout="7" method="POST" '
+                      f'action="/twilio/reject_reason?cid={cid}">{texts.say(lang, prompt)}</Gather>'
+                      f'<Redirect method="POST">/twilio/reject_reason?cid={cid}</Redirect>')
+            return _twiml(gather)
         update_call(cid, ack_result="invalid")
         if retry == 0:
             return _twiml(texts.say(lang, texts.LANGS[lang]["invalid"]) +
                           f'<Redirect method="POST">/twilio/voice?cid={cid}&amp;r=1</Redirect>')
         update_call(cid, outcome="invalid_input")
         return _twiml(texts.say(lang, texts.LANGS[lang]["invalid"]) + "<Hangup/>")
+
+
+def twiml_reject_reason(cid, digits):
+    c = get_call(cid)
+    if not c:
+        return _twiml("<Hangup/>")
+    lang = c["language"] or "en"
+    digits = str(digits or "").strip()
+    reason_text = REJECT_REASONS.get(digits, "Other / unspecified")
+    with ticket_lock(c["ticket_id"]):
+        update_call(cid, reject_reason=reason_text, dtmf=",".join(x for x in (c["dtmf"], f"reason:{digits}") if x))
+        update_ticket(c["ticket_id"], uc1_reject_reason=reason_text)
+        audit(c["ticket_id"], "reject_reason_selected",
+              f"{c['role']} selected decline reason: '{reason_text}' (key {digits or 'none'})", call_id=cid)
+    farewell = texts.LANGS[lang].get("reject_reason_recorded") or texts.LANGS["en"]["reject_reason_recorded"]
+    return _twiml(texts.say(lang, farewell) + "<Hangup/>")
 
 
 def call_status(cid, form):
@@ -1030,7 +1060,7 @@ def _after_escalation_call(t, c, outcome):
 def _call_view(c):
     out = {k: c[k] for k in ("id", "role", "workflow", "attempt_no", "recipient_name", "to_number", "language",
                              "language_source", "template", "template_version", "call_sid", "status", "outcome",
-                             "dtmf", "ack_result", "cause_code", "error_message", "duration_sec", "created_at",
+                             "dtmf", "ack_result", "reject_reason", "cause_code", "error_message", "duration_sec", "created_at",
                              "initiated_at", "answered_at", "ended_at", "superseded")}
     out["picked_up"] = None if c["picked_up"] is None or not c["processed"] else bool(c["picked_up"])
     out["response"] = RESPONSE_TEXT.get(c["outcome"], c["outcome"] or "call in progress")
@@ -1088,10 +1118,12 @@ def ticket_view(tid):
             "acknowledged": t["uc1_state"] == "ACKNOWLEDGED", "acknowledged_via": t["uc1_ack_via"],
             "acknowledged_at": t["uc1_ack_at"],
             "technician_response": tech[-1]["outcome"] if tech else "pending",
+            "technician_reject_reason": t["uc1_reject_reason"],
             "technician_picked_up": any(c["picked_up"] for c in tech) if tech else None,
             "escalation": esc,
             "response_summary": _summary(current),
         },
+        "rejection_reason": t["uc1_reject_reason"],
         "followup": {"state": t["followup_state"], "due_at": t["followup_due_at"]},
         "pending_timers": timers,
         "calls": calls,
@@ -1135,6 +1167,8 @@ def wait_for_result(tid, assignment_id, until="technician", timeout=300):
     view = ticket_view(tid)
     return {
         "call_result": decision if done else "pending",
+        "rejection_reason": view["rejection_reason"],
+        "technician_reject_reason": view["rejection_reason"],
         "timed_out": not done,
         "waited_sec": round(time.time() - start, 1),
         "wait_until": until,

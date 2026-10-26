@@ -21,7 +21,8 @@ CREATE TABLE IF NOT EXISTS tickets (
     ack_digit TEXT, reject_digit TEXT, recipients TEXT, callback_url TEXT,
     version INTEGER, last_event_id TEXT, last_event_time TEXT, last_event_received_at REAL,
     uc1_assignment_id TEXT, uc1_state TEXT, uc1_reason TEXT, uc1_ack_via TEXT, uc1_ack_at TEXT,
-    esc_reason TEXT, esc_detail TEXT,
+    uc1_assignment_id TEXT, uc1_state TEXT, uc1_reason TEXT, uc1_ack_via TEXT, uc1_ack_at TEXT,
+    esc_reason TEXT, esc_detail TEXT, uc1_reject_reason TEXT,
     followup_state TEXT, followup_due_at TEXT,
     created_at TEXT, updated_at TEXT);
 CREATE TABLE IF NOT EXISTS events (
@@ -31,7 +32,7 @@ CREATE TABLE IF NOT EXISTS calls (
     id INTEGER PRIMARY KEY AUTOINCREMENT, ticket_id TEXT, assignment_id TEXT, workflow TEXT,
     role TEXT, attempt_no INTEGER, recipient_name TEXT, to_number TEXT,
     language TEXT, language_source TEXT, template TEXT, template_version TEXT,
-    call_sid TEXT, status TEXT, outcome TEXT, dtmf TEXT, ack_result TEXT, picked_up INTEGER,
+    call_sid TEXT, status TEXT, outcome TEXT, dtmf TEXT, ack_result TEXT, reject_reason TEXT, picked_up INTEGER,
     cause_code TEXT, error_message TEXT, duration_sec INTEGER,
     created_at TEXT, initiated_at TEXT, answered_at TEXT, ended_at TEXT,
     superseded TEXT, processed INTEGER DEFAULT 0);
@@ -59,6 +60,13 @@ def connect(path=None):
         _conn.row_factory = sqlite3.Row
         _keep_v1_tables()
         _conn.executescript(SCHEMA)
+        # Safe column additions for existing tables
+        _cols_t = [r[1] for r in _conn.execute("PRAGMA table_info(tickets)")]
+        if "uc1_reject_reason" not in _cols_t:
+            _conn.execute("ALTER TABLE tickets ADD COLUMN uc1_reject_reason TEXT")
+        _cols_c = [r[1] for r in _conn.execute("PRAGMA table_info(calls)")]
+        if "reject_reason" not in _cols_c:
+            _conn.execute("ALTER TABLE calls ADD COLUMN reject_reason TEXT")
 
 
 def _keep_v1_tables():
