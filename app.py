@@ -516,6 +516,12 @@ class Handler(BaseHTTPRequestHandler):
         if form is None and path != "/api/reload":
             return self._json(400, {"error": "body is not valid JSON"})
         try:
+            if path in ("/api/health", "/health"):
+                return self._json(200, {
+                    "status": "ok",
+                    "message": "no-op: all engineers busy or ticket held",
+                    "time": store.now_iso()
+                })
             if path == "/api/reload":
                 return self._json(200, {
                     "status": "ok",

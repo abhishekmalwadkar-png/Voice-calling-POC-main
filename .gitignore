@@ -13,3 +13,6 @@ __pycache__/
 # Binaries and tools
 cloudflared.exe
 *.exe
+
+# Logs
+*.log

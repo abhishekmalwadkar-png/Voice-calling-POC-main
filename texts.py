@@ -29,7 +29,9 @@ LANGS = {
         "reassign_no": "Thank you. This alert will not be assigned to another technician. Goodbye.",
         "reason_rejected": "has rejected the assignment",
         "reason_no_ack": "has not acknowledged the assignment after {n} calls",
-        "emergency_technician": "{greet} This ticket with number {t} has emergency. Please take action immediately.",
+        "emergency_technician": "{greet} This is an emergency alert. Ticket {t}, alert ID {alert_id}, "
+                                "at {s}. Severity: {severity}. Issue: {desc}. "
+                                "Please take action immediately.",
         "emergency_escalation": "{greet} This is the helpdesk emergency escalation for ticket {t}. Technician {name} {reason}. Please take action or ask technician to review it.",
         "emergency_reason_no_answer": "did not answer the call",
         "emergency_reason_rejected": "has rejected the assignment",
@@ -55,7 +57,9 @@ LANGS = {
         "reassign_no": "شكرا لك. لن يتم إسناد هذا التنبيه إلى فني آخر. مع السلامة.",
         "reason_rejected": "رفض المهمة",
         "reason_no_ack": "لم يؤكد استلام المهمة بعد {n} مكالمات",
-        "emergency_technician": "{greet} هذه التذكرة برقم {t} حالة طوارئ. يرجى اتخاذ الإجراء فورا.",
+        "emergency_technician": "{greet} هذا تنبيه طوارئ. التذكرة {t}، برقم التنبيه {alert_id}. "
+                                "الموقع {s}. مستوى الخطورة {severity}. المشكلة: {desc}. "
+                                "يرجى اتخاذ الإجراء فورا.",
         "emergency_escalation": "{greet} هذا تصعيد طارئ للتذكرة {t}. الفني {name} {reason}. يرجى اتخاذ الإجراء أو مطالبة الفني بمراجعتها.",
         "emergency_reason_no_answer": "لم يرد على المكالمة",
         "emergency_reason_rejected": "رفض المهمة",
@@ -83,7 +87,9 @@ LANGS = {
         "reassign_no": "शुक्रिया। यह अलर्ट दूसरे टेक्नीशियन को नहीं दिया जाएगा। ख़ुदा हाफ़िज़।",
         "reason_rejected": "ने असाइनमेंट मुस्तरद कर दिया है",
         "reason_no_ack": "ने {n} कॉल के बाद भी असाइनमेंट क़ुबूल नहीं किया",
-        "emergency_technician": "{greet} यह टिकट नंबर {t} इमरजेंसी का है। बराए मेहरबानी फ़ौरन कार्रवाई कीजिए।",
+        "emergency_technician": "{greet} यह एक इमरजेंसी अलर्ट है। टिकट {t}, अलर्ट आईडी {alert_id}। "
+                                "साइट {s}। गंभीरता {severity}। मसला: {desc}। "
+                                "बराए मेहरबानी फ़ौरन कार्रवाई कीजिए।",
         "emergency_escalation": "{greet} यह टिकट {t} का इमरजेंसी एस्केलेशन है। टेक्नीशियन {name} {reason}। बराए मेहरबानी कार्रवाई कीजिए या टेक्नीशियन से रिव्यू करने को कहिए।",
         "emergency_reason_no_answer": "ने कॉल का जवाब नहीं दिया",
         "emergency_reason_rejected": "ने असाइनमेंट मुस्तरद कर दिया है",
@@ -110,7 +116,9 @@ LANGS = {
         "reassign_no": "धन्यवाद। यह अलर्ट दूसरे तकनीशियन को नहीं सौंपा जाएगा। अलविदा।",
         "reason_rejected": "ने असाइनमेंट अस्वीकार कर दिया है",
         "reason_no_ack": "ने {n} कॉल के बाद भी असाइनमेंट स्वीकार नहीं किया",
-        "emergency_technician": "{greet} यह टिकट नंबर {t} इमरजेंसी का है। कृपया तुरंत कार्रवाई करें।",
+        "emergency_technician": "{greet} यह एक इमरजेंसी अलर्ट है। टिकट {t}, अलर्ट आईडी {alert_id}। "
+                                "साइट {s}। गंभीरता {severity}। समस्या: {desc}। "
+                                "कृपया तुरंत कार्रवाई करें।",
         "emergency_escalation": "{greet} यह टिकट {t} का इमरजेंसी एस्केलेशन है। तकनीशियन {name} {reason}। कृपया कार्रवाई करें या तकनीशियन से समीक्षा करने को कहें।",
         "emergency_reason_no_answer": "ने कॉल का जवाब नहीं दिया",
         "emergency_reason_rejected": "ने असाइनमेंट अस्वीकार कर दिया है",
@@ -158,13 +166,29 @@ def greeting(lang, name):
     return L["greet_name"].format(rname=name) if name else L["greet"]
 
 
+def clean_desc(desc):
+    if not desc:
+        return "Emergency alert reported"
+    raw = str(desc).replace("\\n", "\n")
+    lines = [
+        line.strip()
+        for line in raw.split("\n")
+        if line.strip() and not line.strip().lower().startswith(("site:", "severity:", "alert:", "sla:", "equipment:", "fault:"))
+    ]
+    cleaned = ". ".join(lines) if lines else raw.replace("\n", " ").strip()
+    return cleaned.rstrip(".")[:180].strip()
+
+
 def voice_text(lang, key, ticket=None, **kw):
     L = LANGS[lang]
     kw.setdefault("greet", L["greet"])
     if ticket is not None:
-        kw.setdefault("t", spell(ticket["ticket_id"]))
+        kw.setdefault("t", spell(ticket.get("ticket_id") or ""))
         kw.setdefault("s", site_words(ticket))
         kw.setdefault("alarm", L["alarm"].format(a=spell(ticket["alarm_id"])) if ticket.get("alarm_id") else "")
+        kw.setdefault("alert_id", spell(ticket.get("alarm_id") or ""))
+        kw.setdefault("severity", ticket.get("severity") or "Critical")
+        kw.setdefault("desc", clean_desc(ticket.get("description")))
     return L[key].format(**kw)
 
 
