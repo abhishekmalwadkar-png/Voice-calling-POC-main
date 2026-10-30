@@ -3,23 +3,33 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Live Portal · Remote Machine Logs</title>
-  <meta name="description" content="Real-time remote log streaming portal for FLM Voice Platform and start_server.bat">
+  <title>NextAsk Voice Platform & Portal</title>
+  <meta name="description" content="NextAsk Voice Platform Management & Real-time Live Log Streaming Portal">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
-  <!-- Header -->
+  <!-- Header with Navigation -->
   <header class="app-header">
     <div class="header-inner">
       <div class="brand">
         <div class="logo-badge">⚡</div>
         <div class="brand-text">
-          <h1>Remote Log Portal <span>Live Stream</span></h1>
-          <p>Real-time stdout, stderr & audit trail from remote machine</p>
+          <h1>NextAsk Voice <span>Control Center</span></h1>
+          <p>AutomationEdge FLM Voice Platform & Live Monitoring</p>
         </div>
+
+        <!-- Navigation Tabs -->
+        <nav class="nav-links">
+          <button id="nav-home-btn" class="nav-link active">
+            🏠 Overview
+          </button>
+          <button id="nav-logs-btn" class="nav-link">
+            📡 Live Console
+          </button>
+        </nav>
       </div>
 
       <div class="agent-status-pill" id="agent-status-pill">
@@ -29,7 +39,7 @@
 
       <div class="header-actions">
         <button id="setup-btn" class="btn" title="View remote machine setup instructions">
-          📖 Setup Remote Agent
+          📖 Setup Guide
         </button>
         <button id="download-btn" class="btn" title="Export current logs to .txt file">
           📥 Download
@@ -41,8 +51,95 @@
     </div>
   </header>
 
-  <!-- Main Content -->
-  <main class="main-content">
+  <!-- HOME VIEW SECTION -->
+  <section class="home-section" id="view-home">
+    <!-- Hero Banner -->
+    <div class="hero-banner">
+      <div class="hero-badge">🚀 Platform Control Center</div>
+      <h2 class="hero-title">NextAsk Voice Alerting & Live Log Streaming</h2>
+      <p class="hero-desc">
+        Welcome to the NextAsk Voice Platform Portal. Manage real-time incident notifications, 
+        technician phone dispatching via Twilio, DTMF acknowledgments, and inspect live console streams 
+        from your remote server instances with zero latency.
+      </p>
+      <div class="hero-actions">
+        <button class="btn-primary-hero" id="hero-goto-logs-btn">
+          📡 Open Live Log Stream &rarr;
+        </button>
+        <button class="btn-secondary-hero" id="hero-setup-btn">
+          📖 Remote Agent Setup
+        </button>
+      </div>
+    </div>
+
+    <!-- Quick Status Strip -->
+    <div class="status-strip">
+      <div class="status-item">
+        <span class="status-label">Remote Server Status</span>
+        <span class="status-value" id="home-server-status">
+          <span class="status-dot"></span> Checking...
+        </span>
+      </div>
+      <div class="status-item">
+        <span class="status-label">Remote Source Host</span>
+        <span class="status-value" id="home-server-host">Waiting for agent...</span>
+      </div>
+      <div class="status-item">
+        <span class="status-label">Total Log Events</span>
+        <span class="status-value" id="home-total-events">0</span>
+      </div>
+      <div class="status-item">
+        <span class="status-label">Gateway Base URL</span>
+        <span class="status-value" style="font-size:13px;color:var(--accent-cyan);">https://nextaskgw.automationedge.com</span>
+      </div>
+    </div>
+
+    <!-- Features Grid -->
+    <div class="features-grid">
+      <div class="feature-card">
+        <div class="feature-icon-wrapper icon-cyan">📡</div>
+        <h3 class="feature-title">Live Remote Log Console</h3>
+        <p class="feature-desc">
+          Stream live stdout and stderr logs from <code>start_server.bat</code> or your server instances 
+          over Server-Sent Events (SSE) with millisecond latency.
+        </p>
+        <button class="feature-link" id="card-logs-link">Go to Live Console &rarr;</button>
+      </div>
+
+      <div class="feature-card">
+        <div class="feature-icon-wrapper icon-blue">📞</div>
+        <h3 class="feature-title">Voice Alert Engine</h3>
+        <p class="feature-desc">
+          Automated multi-lingual voice dispatching (English, Arabic, Hindi, Urdu) with DTMF 
+          acknowledgment and escalation to Team Leaders and Managers.
+        </p>
+        <span style="font-size:12px;color:var(--text-muted);">Configured via Twilio Webhooks</span>
+      </div>
+
+      <div class="feature-card">
+        <div class="feature-icon-wrapper icon-green">🔐</div>
+        <h3 class="feature-title">Security & API Gateway</h3>
+        <p class="feature-desc">
+          Secured with HTTP Basic Auth and <code>X-API-Key</code> token validation on all 
+          critical endpoints (<code>/api/authorize</code>, <code>/api/alerts</code>).
+        </p>
+        <span style="font-size:12px;color:var(--text-muted);">Active Protection</span>
+      </div>
+
+      <div class="feature-card">
+        <div class="feature-icon-wrapper icon-purple">⚡</div>
+        <h3 class="feature-title">Instant Setup & Ingest</h3>
+        <p class="feature-desc">
+          Zero-dependency remote logging agent ready to drop into any Windows or Linux server 
+          with one batch script.
+        </p>
+        <button class="feature-link" id="card-setup-link">View Setup Guide &rarr;</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- LOGS VIEW SECTION (Initially Hidden or Toggled) -->
+  <main class="main-content" id="view-logs" style="display: none;">
     <!-- Metrics Grid -->
     <section class="metrics-grid">
       <div class="metric-card received">

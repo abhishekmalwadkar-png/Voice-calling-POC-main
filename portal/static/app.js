@@ -440,3 +440,60 @@ document.querySelectorAll('.copy-mini-btn').forEach((btn) => {
 initSSE();
 updateStatus();
 setInterval(updateStatus, 3000);
+
+// --- Navigation Tab Switching (Home vs Live Logs) ---
+const viewHome = document.getElementById('view-home');
+const viewLogs = document.getElementById('view-logs');
+const navHomeBtn = document.getElementById('nav-home-btn');
+const navLogsBtn = document.getElementById('nav-logs-btn');
+const heroGotoLogsBtn = document.getElementById('hero-goto-logs-btn');
+const heroSetupBtn = document.getElementById('hero-setup-btn');
+const cardLogsLink = document.getElementById('card-logs-link');
+const cardSetupLink = document.getElementById('card-setup-link');
+
+const homeServerStatus = document.getElementById('home-server-status');
+const homeServerHost = document.getElementById('home-server-host');
+const homeTotalEvents = document.getElementById('home-total-events');
+
+function switchView(viewName) {
+  if (viewName === 'logs') {
+    if (viewHome) viewHome.style.display = 'none';
+    if (viewLogs) viewLogs.style.display = 'block';
+    if (navHomeBtn) navHomeBtn.classList.remove('active');
+    if (navLogsBtn) navLogsBtn.classList.add('active');
+    renderLogs();
+    if (state.autoScroll) scrollToBottom();
+  } else {
+    if (viewHome) viewHome.style.display = 'flex';
+    if (viewLogs) viewLogs.style.display = 'none';
+    if (navHomeBtn) navHomeBtn.classList.add('active');
+    if (navLogsBtn) navLogsBtn.classList.remove('active');
+  }
+}
+
+if (navHomeBtn) navHomeBtn.addEventListener('click', () => switchView('home'));
+if (navLogsBtn) navLogsBtn.addEventListener('click', () => switchView('logs'));
+if (heroGotoLogsBtn) heroGotoLogsBtn.addEventListener('click', () => switchView('logs'));
+if (cardLogsLink) cardLogsLink.addEventListener('click', () => switchView('logs'));
+
+if (heroSetupBtn) heroSetupBtn.addEventListener('click', () => setupModal.classList.add('open'));
+if (cardSetupLink) cardSetupLink.addEventListener('click', () => setupModal.classList.add('open'));
+
+// Sync home indicators with status polling
+const origUpdateStatus = updateStatus;
+updateStatus = async function() {
+  await origUpdateStatus();
+  if (homeServerStatus) {
+    if (state.agentOnline) {
+      homeServerStatus.innerHTML = '<span class="status-dot"></span> <span style="color:var(--accent-emerald);">ONLINE (Active)</span>';
+    } else {
+      homeServerStatus.innerHTML = '<span class="status-dot" style="background:#94a3b8;box-shadow:none;"></span> <span style="color:#94a3b8;">OFFLINE (Waiting)</span>';
+    }
+  }
+  if (homeServerHost && metricHost) {
+    homeServerHost.textContent = metricHost.textContent;
+  }
+  if (homeTotalEvents) {
+    homeTotalEvents.textContent = state.logs.length;
+  }
+};

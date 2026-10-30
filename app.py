@@ -1,3 +1,61 @@
+
+def docs_html():
+    return """<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>NextAsk Gateway - API Documentation</title>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/github-markdown-css/5.5.0/github-markdown.min.css">
+  <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+  <style>
+    body {
+      background-color: #0d1117;
+      color: #c9d1d9;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+      margin: 0;
+      padding: 20px;
+    }
+    .markdown-body {
+      box-sizing: border-box;
+      min-width: 200px;
+      max-width: 980px;
+      margin: 0 auto;
+      padding: 45px;
+      background: #161b22;
+      border: 1px solid #30363d;
+      border-radius: 8px;
+    }
+    .badge {
+      display: inline-block;
+      padding: 4px 8px;
+      border-radius: 4px;
+      font-weight: bold;
+      font-size: 12px;
+      margin-right: 6px;
+    }
+    .get { background: #238636; color: white; }
+    .post { background: #1f6feb; color: white; }
+    @media (max-width: 767px) {
+      .markdown-body { padding: 15px; }
+    }
+  </style>
+</head>
+<body>
+  <article class="markdown-body" id="content">Loading documentation...</article>
+  <script>
+    fetch('/api/docs/raw')
+      .then(res => res.text())
+      .then(md => {
+        document.getElementById('content').innerHTML = marked.parse(md);
+      })
+      .catch(err => {
+        document.getElementById('content').innerHTML = '<p>Error loading documentation: ' + err + '</p>';
+      });
+  </script>
+</body>
+</html>"""
+
 """
 FLM Helpdesk - voice call platform (Twilio). Implements the call side of "FLM Helpdesk Final PoC Workflows":
 UC1 technician notification + acknowledgement, 2nd attempt, Team Leader / Manager escalation calls,
@@ -553,7 +611,7 @@ class Handler(BaseHTTPRequestHandler):
                 store.audit(None, "twilio_signature_rejected", f"Rejected unsigned/forged request to {self.path}")
             return ok
         if path in ("/api/health", "/health", "/api/authenticate", "/authenticate", "/api/auth", "/api/login",
-                    "/api/authorize", "/api/authorization", "/api/verify"):
+                    "/api/authorize", "/api/authorization", "/api/verify", "/docs", "/api/docs", "/documentation"):
             return True
         if path.startswith("/api/"):
             sent_key = self._extract_token(form)
@@ -583,6 +641,14 @@ class Handler(BaseHTTPRequestHandler):
         try:
             if path == "/":
                 return self._send(200, dashboard_html())
+            if path in ("/docs", "/api/docs", "/documentation"):
+                return self._send(200, docs_html())
+            if path == "/api/docs/raw":
+                doc_path = os.path.join(os.path.dirname(__file__), "API_DOCUMENTATION.md")
+                if os.path.isfile(doc_path):
+                    with open(doc_path, "r", encoding="utf-8") as df:
+                        return self._send(200, df.read(), "text/markdown; charset=utf-8")
+                return self._json(404, {"error": "API_DOCUMENTATION.md not found"})
             if path == "/api/health":
                 return self._json(200, {"status": "ok", "dry_run": CFG["dry_run"], "time": store.now_iso()})
             if path in ("/api/authenticate", "/authenticate", "/api/auth", "/api/login"):
