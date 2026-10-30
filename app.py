@@ -1928,6 +1928,12 @@ def start_cloudflared(port):
 def main():
     store.connect()
     try:
+        import pg_store
+        if pg_store.init_db():
+            print(f"PostgreSQL DB    : Connected ({CFG.get('pg_name')}@{CFG.get('pg_host')}:{CFG.get('pg_port')})", flush=True)
+    except Exception as e:
+        print(f"PostgreSQL DB    : Offline or disabled ({e})", flush=True)
+    try:
         server = Server(("0.0.0.0", CFG["port"]), Handler)
     except OSError:
         raise SystemExit(f"Port {CFG['port']} is already in use - is app.py already running?") from None

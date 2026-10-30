@@ -48,6 +48,13 @@ CFG = {
     "dry_run": _env("DRY_RUN", "0") == "1",
     "api_key": _env("API_KEY"),
     "db_path": _env("DB_PATH", os.path.join(BASE_DIR, "flm_calls.db")),
+    # PostgreSQL System Database (FLMHelpdesk)
+    "pg_host": _env("DB_HOST", "localhost", "PG_HOST"),
+    "pg_port": _int("DB_PORT", 5432, "PG_PORT"),
+    "pg_name": _env("DB_NAME", "FLM-Helpdesk", "PG_DATABASE"),
+    "pg_user": _env("DB_USER", "postgres", "PG_USER"),
+    "pg_password": _env("DB_PASSWORD", "root", "PG_PASSWORD"),
+    "pg_enabled": _env("DB_ENABLED", "1") == "1",
     # Technician (PDF p.2-3: maximum 2 initial attempts)
     "tech_max_attempts": _int("TECH_MAX_ATTEMPTS", 2, "MAX_ATTEMPTS"),
     "tech_retry_sec": _int("TECH_RETRY_INTERVAL_SEC", 60, "RETRY_INTERVAL_SEC"),

@@ -1544,6 +1544,13 @@ def handle_alert_intake(payload):
             "error": "no alerts provided in request body"
         }
 
+    # Persist alert intake payload into PostgreSQL production database
+    try:
+        import pg_store
+        pg_store.save_alert_intake(payload)
+    except Exception as e:
+        logger.warning(f"PostgreSQL persistence notice: {e}")
+
     results = []
     success_count = 0
     fail_count = 0
