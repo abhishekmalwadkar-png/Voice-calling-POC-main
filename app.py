@@ -497,6 +497,12 @@ def safe_esc(val):
         return ""
     return escape(str(val))
 
+
+def safe_esc(val):
+    if val is None:
+        return ""
+    return html.escape(str(val), quote=True)
+
 def dashboard_html():
     tickets = queries.list_tickets({"limit": 50})
     total_tickets = len(tickets)
@@ -595,7 +601,6 @@ def dashboard_html():
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta http-equiv="refresh" content="10">
   <title>NextAsk Voice Platform · Live Operations Console</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -701,6 +706,7 @@ def dashboard_html():
       display: inline-flex;
       align-items: center;
       gap: 6px;
+      cursor: pointer;
       transition: background 0.2s ease;
     }}
     .btn-header:hover {{
@@ -737,6 +743,13 @@ def dashboard_html():
       box-shadow: 0 1px 3px rgba(0,0,0,0.05);
       position: relative;
       overflow: hidden;
+      cursor: pointer;
+      transition: transform 0.15s ease, box-shadow 0.15s ease, border-color 0.15s ease;
+    }}
+    .metric-card:hover {{
+      transform: translateY(-2px);
+      box-shadow: 0 6px 16px rgba(0,0,0,0.08);
+      border-color: #cbd5e1;
     }}
     .metric-card::before {{
       content: '';
@@ -847,7 +860,7 @@ def dashboard_html():
     .btn-dispatch:hover {{
       background: #0856b3;
     }}
-    /* Controls & Filter Bar */
+    /* Tabs & Filter Bar */
     .controls-bar {{
       display: flex;
       justify-content: space-between;
@@ -864,22 +877,30 @@ def dashboard_html():
     .filter-btn {{
       background: #fff;
       border: 1px solid var(--border);
-      color: var(--text-muted);
-      padding: 8px 14px;
+      color: #334155;
+      padding: 9px 16px;
       border-radius: 8px;
       font-size: 13px;
       font-weight: 600;
       cursor: pointer;
       transition: all 0.15s ease;
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
     }}
-    .filter-btn.active, .filter-btn:hover {{
-      background: #0969da;
-      color: #fff;
-      border-color: #0969da;
+    .filter-btn:hover {{
+      background: #f1f5f9;
+      border-color: #cbd5e1;
+    }}
+    .filter-btn.active {{
+      background: #0969da !important;
+      color: #ffffff !important;
+      border-color: #0969da !important;
+      box-shadow: 0 2px 6px rgba(9, 105, 218, 0.35);
     }}
     .search-box {{
       position: relative;
-      min-width: 260px;
+      min-width: 280px;
     }}
     .search-input {{
       width: 100%;
@@ -1058,6 +1079,16 @@ def dashboard_html():
       font-size: 11.5px;
       color: #64748b;
     }}
+    .empty-state {{
+      background: #fff;
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 48px 24px;
+      text-align: center;
+      color: #64748b;
+      font-size: 14px;
+      display: none;
+    }}
   </style>
 </head>
 <body>
@@ -1073,23 +1104,24 @@ def dashboard_html():
       <div class="live-pulse">
         <span class="pulse-dot"></span> Live Console
       </div>
+      <button onclick="window.location.reload()" class="btn-header" title="Refresh data">🔄 Refresh</button>
       <a href="/api/logs/download" class="btn-header" download>📥 Export Logs</a>
       <a href="/logout" class="btn-header btn-logout">🚪 Logout</a>
     </div>
   </header>
 
   <main>
-    <!-- Executive KPI Metrics -->
+    <!-- Executive KPI Metrics (Clickable) -->
     <div class="metrics-grid">
-      <div class="metric-card metric-blue">
+      <div class="metric-card metric-blue" onclick="switchTab('all')" title="Click to view all tickets">
         <div class="metric-label">Total Dispatch Tickets</div>
         <div class="metric-value-row">
           <div class="metric-number">{total_tickets}</div>
-          <span class="metric-badge badge-blue">100% Volume</span>
+          <span class="metric-badge badge-blue">View All</span>
         </div>
       </div>
 
-      <div class="metric-card metric-green">
+      <div class="metric-card metric-green" onclick="switchTab('ack')" title="Click to view acknowledged tickets">
         <div class="metric-label">Calls Acknowledged</div>
         <div class="metric-value-row">
           <div class="metric-number">{ack_count}</div>
@@ -1097,7 +1129,7 @@ def dashboard_html():
         </div>
       </div>
 
-      <div class="metric-card metric-amber">
+      <div class="metric-card metric-amber" onclick="switchTab('calling')" title="Click to view active dialing tickets">
         <div class="metric-label">Active / Dialing</div>
         <div class="metric-value-row">
           <div class="metric-number">{calling_count}</div>
@@ -1105,7 +1137,7 @@ def dashboard_html():
         </div>
       </div>
 
-      <div class="metric-card metric-purple">
+      <div class="metric-card metric-purple" onclick="switchTab('escalated')" title="Click to view escalated tickets">
         <div class="metric-label">Escalated / Pending</div>
         <div class="metric-value-row">
           <div class="metric-number">{escalated_count}</div>
@@ -1165,23 +1197,28 @@ def dashboard_html():
       </div>
     </div>
 
-    <!-- Search & Filter Controls -->
-    <div class="controls-bar">
+    <!-- Tabs & Filter Bar -->
+    <div class="controls-bar" id="ticketsSection">
       <div class="filter-pills">
-        <button class="filter-btn active" onclick="filterTickets('all', this)">All Tickets ({total_tickets})</button>
-        <button class="filter-btn" onclick="filterTickets('ack', this)">Acknowledged ({ack_count})</button>
-        <button class="filter-btn" onclick="filterTickets('calling', this)">Dialing ({calling_count})</button>
-        <button class="filter-btn" onclick="filterTickets('escalated', this)">Escalated ({escalated_count})</button>
+        <button type="button" id="tab-btn-all" class="filter-btn active" onclick="switchTab('all')">📋 All Tickets ({total_tickets})</button>
+        <button type="button" id="tab-btn-ack" class="filter-btn" onclick="switchTab('ack')">✅ Acknowledged ({ack_count})</button>
+        <button type="button" id="tab-btn-calling" class="filter-btn" onclick="switchTab('calling')">📞 Dialing ({calling_count})</button>
+        <button type="button" id="tab-btn-escalated" class="filter-btn" onclick="switchTab('escalated')">⚠️ Escalated ({escalated_count})</button>
       </div>
       <div class="search-box">
         <span class="search-icon">🔍</span>
-        <input type="text" id="searchInput" class="search-input" placeholder="Search ticket, site, alert ID..." onkeyup="filterSearch()">
+        <input type="text" id="searchInput" class="search-input" placeholder="Search ticket, site, alert ID..." oninput="runFilter()">
       </div>
+    </div>
+
+    <!-- Empty State for filtered results -->
+    <div id="emptyCategoryMsg" class="empty-state">
+      No tickets found matching the selected filter or search keyword.
     </div>
 
     <!-- Tickets Feed -->
     <div id="ticketsList">
-      {cards or '<div style="background:#fff;padding:40px;text-align:center;border-radius:12px;border:1px solid #e2e8f0;color:#64748b;">No active tickets in queue. Use Alert Intake API (/api/alerts) or the manual dispatcher above.</div>'}
+      {cards or '<div class="empty-state" style="display:block;">No active tickets in queue. Use Alert Intake API (/api/alerts) or the manual dispatcher above.</div>'}
     </div>
   </main>
 
@@ -1198,26 +1235,58 @@ def dashboard_html():
       }}
     }}
 
-    var currentCategory = 'all';
+    var activeCategory = 'all';
 
-    function filterTickets(cat, btn) {{
-      currentCategory = cat;
-      document.querySelectorAll('.filter-btn').forEach(function(b) {{ b.classList.remove('active'); }});
-      if (btn) btn.classList.add('active');
-      filterSearch();
+    function switchTab(cat) {{
+      activeCategory = cat;
+      try {{
+        sessionStorage.setItem('flm_active_tab', cat);
+      }} catch(e) {{}}
+
+      document.querySelectorAll('.filter-btn').forEach(function(btn) {{
+        btn.classList.remove('active');
+      }});
+
+      var activeBtn = document.getElementById('tab-btn-' + cat);
+      if (activeBtn) {{
+        activeBtn.classList.add('active');
+      }}
+
+      runFilter();
     }}
 
-    function filterSearch() {{
+    function runFilter() {{
       var q = (document.getElementById('searchInput').value || '').toLowerCase().trim();
       var cards = document.querySelectorAll('.ticket-card');
+      var visible = 0;
+
       cards.forEach(function(card) {{
         var cat = card.getAttribute('data-category');
         var text = (card.getAttribute('data-search') || '').toLowerCase();
-        var catMatch = (currentCategory === 'all' || cat === currentCategory);
-        var searchMatch = !q || text.indexOf(q) !== -1;
-        card.style.display = (catMatch && searchMatch) ? 'block' : 'none';
+        var catMatch = (activeCategory === 'all' || cat === activeCategory);
+        var searchMatch = (!q || text.indexOf(q) !== -1);
+
+        if (catMatch && searchMatch) {{
+          card.style.display = 'block';
+          visible++;
+        }} else {{
+          card.style.display = 'none';
+        }}
       }});
+
+      var emptyEl = document.getElementById('emptyCategoryMsg');
+      if (emptyEl) {{
+        emptyEl.style.display = (visible === 0) ? 'block' : 'none';
+      }}
     }}
+
+    // Restore saved tab if user previously selected one
+    try {{
+      var savedTab = sessionStorage.getItem('flm_active_tab');
+      if (savedTab && ['all', 'ack', 'calling', 'escalated'].indexOf(savedTab) !== -1) {{
+        switchTab(savedTab);
+      }}
+    }} catch(e) {{}}
   </script>
 </body>
 </html>"""
