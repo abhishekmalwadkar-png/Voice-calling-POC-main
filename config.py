@@ -79,4 +79,7 @@ CFG = {
     "ae_push_url": _env("AE_PUSH_URL", "https://dev-p187.ac2.automationedge.com/api/push-notifications"),
     "ae_service_url": _env("AE_SERVICE_URL", "http://localhost:3978/whatsapp"),
     "ae_bot_id": _env("AE_BOT_ID", "104650799293101"),
+    # User Authentication
+    "auth_username": _env("AUTH_USERNAME", "admin"),
+    "auth_password": _env("AUTH_PASSWORD", "admin123"),
 }

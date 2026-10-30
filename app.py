@@ -7,6 +7,7 @@ WhatsApp is out of scope (handled by another system - use the outbound webhook e
 Run:  python app.py      (standard library only)
 API:  see "FLM Voice Call API Guide"; every /api/* call needs header X-API-Key.
 """
+import base64
 import importlib
 import json
 import re
@@ -109,7 +110,8 @@ def legacy_call(form):
         "event_id": f"CALL-{tid}-{stamp}", "event_type": "ASSIGNMENT_CREATED",
         "ticket": {"ticket_id": tid, "alarm_id": form["alert_id"], "assignment_id": f"{tid}-A{stamp}",
                    "site_name": form["site_details"], "description": form.get("description"),
-                   "severity": form.get("severity") or "Major", "status": "Assigned"},
+                   "severity": form.get("severity") or "Major", "status": "Assigned",
+                   "region": form.get("region"), "country_code": form.get("country_code")},
         "ack_digit": form.get("ack_digit") or "1", "reject_digit": form.get("reject_digit"),
         "callback_url": form.get("callback_url"), "recipients": recipients,
     }
@@ -421,6 +423,126 @@ class Handler(BaseHTTPRequestHandler):
         tunnelled = bool(self.headers.get("Cf-Connecting-Ip"))  # cloudflared adds it
         return not tunnelled and self.client_address[0] in ("127.0.0.1", "::1")
 
+    def _extract_token(self, form=None):
+        auth_header = self.headers.get("Authorization", "")
+        bearer_token = auth_header[7:].strip() if auth_header.lower().startswith("bearer ") else ""
+        query_key = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query).get("key", [""])[0]
+        body_token = (isinstance(form, dict) and (form.get("token") or form.get("api_key") or form.get("key"))) or ""
+        return (self.headers.get("X-API-Key") or
+                self.headers.get("x_api_key") or
+                self.headers.get("api_key") or
+                self.headers.get("apikey") or
+                self.headers.get("X-Auth-Token") or
+                bearer_token or
+                query_key or
+                body_token)
+
+    def _resolve_caller(self, token):
+        if not token:
+            return None
+        if CFG["api_key"] and token == CFG["api_key"]:
+            return {
+                "username": "api_admin",
+                "role": "admin",
+                "full_name": "API Key Administrator",
+                "auth_type": "api_key"
+            }
+        username = store.verify_auth_token(token)
+        if username:
+            user = store.q("SELECT id, username, role, full_name, is_active FROM users WHERE username = ?", (username,), one=True)
+            if user:
+                return {
+                    "username": user["username"],
+                    "role": user["role"],
+                    "full_name": user["full_name"],
+                    "auth_type": "bearer_token"
+                }
+            return {
+                "username": username,
+                "role": "admin",
+                "full_name": username,
+                "auth_type": "bearer_token"
+            }
+        return None
+
+    def _handle_authorize(self, form=None, params=None):
+        params = params or {}
+        # 1. First, check username & password (via Basic Auth, JSON body, or query params)
+        username = (isinstance(form, dict) and (form.get("username") or form.get("user"))) or params.get("username") or params.get("user")
+        password = (isinstance(form, dict) and (form.get("password") or form.get("pass"))) or params.get("password") or params.get("pass")
+
+        if not username or not password:
+            auth_header = self.headers.get("Authorization", "")
+            if auth_header.lower().startswith("basic "):
+                try:
+                    decoded = base64.b64decode(auth_header[6:].strip()).decode("utf-8")
+                    if ":" in decoded:
+                        username, password = decoded.split(":", 1)
+                except Exception:
+                    pass
+
+        if username and password:
+            user = store.verify_user(str(username).strip(), str(password))
+            if user:
+                token, ttl = store.create_auth_token(user["username"])
+                return self._json(200, {
+                    "status": "success",
+                    "authorized": True,
+                    "http_code": 200,
+                    "message": "User authenticated successfully. Use the provided api_key in the headers of other APIs.",
+                    "api_key": CFG.get("api_key", ""),
+                    "x_api_key": CFG.get("api_key", ""),
+                    "token": token,
+                    "token_type": "Bearer",
+                    "expires_in": ttl,
+                    "user": {
+                        "username": user["username"],
+                        "role": user.get("role", "admin"),
+                        "full_name": user.get("full_name", user["username"]),
+                        "auth_type": "credentials"
+                    }
+                })
+            return self._json(401, {
+                "status": "error",
+                "authorized": False,
+                "http_code": 401,
+                "error": "Unauthorized: Invalid username or password.",
+                "message": "The username or password provided is incorrect."
+            })
+
+        # 2. Check if caller passed existing X-API-Key / token to verify it
+        token = self._extract_token(form)
+        if token:
+            caller = self._resolve_caller(token)
+            if caller:
+                return self._json(200, {
+                    "status": "success",
+                    "authorized": True,
+                    "http_code": 200,
+                    "message": "API Key is valid and active.",
+                    "api_key": CFG.get("api_key", ""),
+                    "x_api_key": CFG.get("api_key", ""),
+                    "api_key_valid": True,
+                    "user": caller
+                })
+            return self._json(401, {
+                "status": "error",
+                "authorized": False,
+                "http_code": 401,
+                "error": "Unauthorized: Invalid API Key provided.",
+                "message": "The provided API Key is invalid or inactive.",
+                "api_key_valid": False
+            })
+
+        # 3. Neither credentials nor API key provided
+        return self._json(400, {
+            "status": "error",
+            "authorized": False,
+            "http_code": 400,
+            "error": "Bad Request: Missing credentials.",
+            "message": "Please provide username and password via Basic Auth or JSON body to obtain your API Key.",
+            "required": ["username", "password"]
+        })
     def _authorized(self, path, form):
         if path.startswith("/twilio/"):
             if CFG["dry_run"] or not CFG["validate_twilio_signature"]:
@@ -430,29 +552,117 @@ class Handler(BaseHTTPRequestHandler):
             if not ok:
                 store.audit(None, "twilio_signature_rejected", f"Rejected unsigned/forged request to {self.path}")
             return ok
-        if path == "/api/health":
+        if path in ("/api/health", "/health", "/api/authenticate", "/authenticate", "/api/auth", "/api/login",
+                    "/api/authorize", "/api/authorization", "/api/verify"):
             return True
         if path.startswith("/api/"):
-            if CFG["api_key"]:
-                query_key = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query).get("key", [""])[0]
-                sent_key = (self.headers.get("X-API-Key") or
-                            self.headers.get("x_api_key") or
-                            self.headers.get("api_key") or
-                            self.headers.get("apikey") or
-                            query_key)
-                return sent_key == CFG["api_key"]
-            return self._from_this_pc()
+            sent_key = self._extract_token(form)
+            if CFG["api_key"] and sent_key == CFG["api_key"]:
+                return True
+            if sent_key and store.verify_auth_token(sent_key):
+                return True
+            if not CFG["api_key"] and not sent_key:
+                return self._from_this_pc()
+            return False
+            if not CFG["api_key"] and not sent_key:
+                return self._from_this_pc()
+            return False
         return self._from_this_pc()  # dashboard and its call form: this PC only
 
     def do_GET(self):
-        path, params, _ = self._parse()
+        path, params, form = self._parse()
         if not self._authorized(path, {}):
-            return self._json(401, {"error": "unauthorized - send header X-API-Key"})
+            return self._json(401, {
+                "status": "error",
+                "authorized": False,
+                "http_code": 401,
+                "error": "Unauthorized: Missing or invalid API Key.",
+                "message": "Please provide 'X-API-Key: 5adJjBRSydznz8qO8e6Du128rWb5djvd' in request headers.",
+                "required_header": "X-API-Key"
+            })
         try:
             if path == "/":
                 return self._send(200, dashboard_html())
             if path == "/api/health":
                 return self._json(200, {"status": "ok", "dry_run": CFG["dry_run"], "time": store.now_iso()})
+            if path in ("/api/authenticate", "/authenticate", "/api/auth", "/api/login"):
+                return self._json(200, {
+                    "status": "ok",
+                    "endpoint": path,
+                    "method": "POST",
+                    "description": "Send a POST request with JSON body containing 'username' and 'password' to authenticate.",
+                    "example": {"username": "admin", "password": "your_password"}
+                })
+            if path in ("/api/authorize", "/api/authorization", "/api/verify"):
+                return self._handle_authorize(form=None, params=params)
+            if path in ("/api/getalerts", "/api/get_alerts", "/api/alerts/get", "/api/alerts", "/api/alerts/intake"):
+                # Other APIs require only X-API-Key
+                api_key = self._extract_token(form)
+                caller = self._resolve_caller(api_key)
+                if not caller:
+                    return self._json(401, {
+                        "status": "error",
+                        "authorized": False,
+                        "http_code": 401,
+                        "error": "Unauthorized: Missing or invalid API Key.",
+                        "message": "Please provide 'X-API-Key: 5adJjBRSydznz8qO8e6Du128rWb5djvd' in request headers.",
+                        "required_header": "X-API-Key"
+                    })
+
+                res = workflow.get_alerts_view(form)
+                res["authorized"] = True
+                res["auth"] = {
+                    "status": "authorized",
+                    "user": caller.get("username", "api_admin"),
+                    "role": caller.get("role", "admin"),
+                    "api_key_valid": True,
+                    "auth_type": caller.get("auth_type", "api_key")
+                }
+                return self._json(200, res)
+
+            if path in ("/api/getalerts", "/api/get_alerts", "/api/alerts/get"):
+                api_key = self._extract_token(form)
+                caller = self._resolve_caller(api_key)
+                if not caller:
+                    return self._json(401, {
+                        "status": "error",
+                        "authorized": False,
+                        "http_code": 401,
+                        "error": "Unauthorized: Missing or invalid API Key.",
+                        "message": "Please provide 'X-API-Key: 5adJjBRSydznz8qO8e6Du128rWb5djvd' in request headers.",
+                        "required_header": "X-API-Key"
+                    })
+                res = workflow.get_alerts_view(form)
+                res["authorized"] = True
+                res["auth"] = {
+                    "status": "authorized",
+                    "user": caller.get("username", "api_admin"),
+                    "role": caller.get("role", "admin"),
+                    "api_key_valid": True,
+                    "auth_type": caller.get("auth_type", "api_key")
+                }
+                return self._json(200, res)
+            if path in ("/api/alerts/intake", "/api/alert_intake", "/api/alerts", "/api/alert"):
+                return self._json(200, {
+                    "status": "ok",
+                    "endpoint": path,
+                    "method": "POST",
+                    "description": "Alert Intake API. Accepts single alert object or array of alerts.",
+                    "required_fields": [
+                        "ticket_id",
+                        "site_name or site_number",
+                        "description (or issue / alarm_type)",
+                        "technician_mobile (or phone_number)"
+                    ],
+                    "all_fields": [
+                        "ticket_id", "alarm_id", "site_number", "site_name",
+                        "description", "severity", "ticket_status", "alarm_status",
+                        "technician_id", "technician_name", "technician_mobile",
+                        "team_leader_id", "team_leader_name", "team_leader_mobile",
+                        "manager_id", "manager_name", "manager_mobile",
+                        "region", "country_code", "date_time"
+                    ]
+                })
             if path == "/api/reload":
                 return self._json(200, {
                     "status": "ok",
@@ -508,12 +718,25 @@ class Handler(BaseHTTPRequestHandler):
         except ValueError as e:
             self._json(400, {"error": str(e)})
 
+    def do_PUT(self):
+        return self._json(405, {"status": "error", "http_code": 405, "error": "Method Not Allowed"})
+
+    def do_DELETE(self):
+        return self._json(405, {"status": "error", "http_code": 405, "error": "Method Not Allowed"})
+
     def do_POST(self):
         path, params, form = self._parse()
         if not self._authorized(path, form):
             if path.startswith("/twilio/"):
                 return self._send(403, "invalid Twilio signature", "text/plain")
-            return self._json(401, {"error": "unauthorized - send header X-API-Key"})
+            return self._json(401, {
+                "status": "error",
+                "authorized": False,
+                "http_code": 401,
+                "error": "Unauthorized: Missing or invalid API Key.",
+                "message": "Please provide 'X-API-Key: 5adJjBRSydznz8qO8e6Du128rWb5djvd' in request headers.",
+                "required_header": "X-API-Key"
+            })
         if form is None and path != "/api/reload":
             return self._json(400, {"error": "body is not valid JSON"})
         try:
@@ -523,13 +746,61 @@ class Handler(BaseHTTPRequestHandler):
                     "message": "no-op: all engineers busy or ticket held",
                     "time": store.now_iso()
                 })
-            if path == "/api/reload":
+            if path in ("/api/authenticate", "/authenticate", "/api/auth", "/api/login"):
+                if not isinstance(form, dict):
+                    return self._json(400, {
+                        "status": "error",
+                        "error": "body must be a valid JSON object with username and password"
+                    })
+                username = str(form.get("username") or form.get("user") or form.get("email") or "").strip()
+                password = str(form.get("password") or form.get("pass") or "")
+                if not username or not password:
+                    return self._json(400, {
+                        "status": "error",
+                        "error": "username and password are required"
+                    })
+                user = store.verify_user(username, password)
+                if not user:
+                    store.audit(None, "auth_failed", f"Failed authentication attempt for username '{username}'")
+                    return self._json(401, {
+                        "status": "error",
+                        "error": "Invalid username or password"
+                    })
+                token, ttl = store.create_auth_token(user["username"])
+                store.audit(None, "auth_success", f"User '{user['username']}' authenticated successfully")
                 return self._json(200, {
-                    "status": "ok",
-                    "action": "modules_reloaded",
-                    "modules": _reload_modules(),
-                    "time": store.now_iso(),
+                    "status": "success",
+                    "message": "Authentication successful",
+                    "token": token,
+                    "token_type": "Bearer",
+                    "expires_in": ttl,
+                    "api_key": CFG.get("api_key", ""),
+                    "user": {
+                        "username": user["username"],
+                        "role": user.get("role", "admin"),
+                        "full_name": user.get("full_name", user["username"]),
+                    }
                 })
+            if path in ("/api/authorize", "/api/authorization", "/api/verify"):
+                return self._handle_authorize(form=form, params=params)
+            if path in ("/api/alerts/intake", "/api/alert_intake", "/api/alerts", "/api/alert"):
+                code, body = workflow.handle_alert_intake(form)
+                if isinstance(body, dict):
+                    api_key = self._extract_token(form)
+                    caller = self._resolve_caller(api_key) or {
+                        "username": "api_admin",
+                        "role": "admin",
+                        "auth_type": "api_key"
+                    }
+                    body["authorized"] = True
+                    body["auth"] = {
+                        "status": "authorized",
+                        "user": caller.get("username", "api_admin"),
+                        "role": caller.get("role", "admin"),
+                        "api_key_valid": True,
+                        "auth_type": caller.get("auth_type", "api_key")
+                    }
+                return self._json(code, body)
             if path == "/api/events":
                 wants = _wants_wait(params) and str(form.get("event_type", "")).upper() in (
                     "ASSIGNMENT_CREATED", "REASSIGNED")
@@ -636,7 +907,9 @@ def main():
     base = CFG["base_url"] or f"http://localhost:{CFG['port']}"
     print(f"Public base URL  : {CFG['base_url'] or '(dry run)'}")
     print(f"Dashboard        : http://localhost:{CFG['port']}  (this PC only)")
+    print(f"Auth API         : POST {base}/api/authenticate (and /api/authorize)")
     print(f"Event API        : POST {base}/api/events")
+    print(f"Alert Intake API : POST {base}/api/alerts/intake")
     print(f"Emergency API    : POST {base}/api/emergency_api")
     print(f"Emergency Close  : POST {base}/api/emergency_close")
     print(f"Follow-up API    : POST {base}/api/tickets/<ticket_id>/followup")

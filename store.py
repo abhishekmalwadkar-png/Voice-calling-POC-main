@@ -3,6 +3,8 @@ import json
 import sqlite3
 import threading
 import time
+import hashlib
+import secrets
 from datetime import datetime, timezone, timedelta
 
 from config import CFG
@@ -16,11 +18,11 @@ _TICKET_LOCKS_GUARD = threading.Lock()
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS tickets (
     ticket_id TEXT PRIMARY KEY,
-    alarm_id TEXT, assignment_id TEXT, site_number TEXT, site_name TEXT, severity TEXT,
+    alert_id TEXT, alarm_id TEXT, assignment_id TEXT, site_number TEXT, site_name TEXT, severity TEXT,
     status TEXT, alarm_status TEXT, operational_status TEXT, description TEXT,
+    region TEXT, country_code TEXT,
     ack_digit TEXT, reject_digit TEXT, recipients TEXT, callback_url TEXT,
     version INTEGER, last_event_id TEXT, last_event_time TEXT, last_event_received_at REAL,
-    uc1_assignment_id TEXT, uc1_state TEXT, uc1_reason TEXT, uc1_ack_via TEXT, uc1_ack_at TEXT,
     uc1_assignment_id TEXT, uc1_state TEXT, uc1_reason TEXT, uc1_ack_via TEXT, uc1_ack_at TEXT,
     esc_reason TEXT, esc_detail TEXT, uc1_reject_reason TEXT,
     followup_state TEXT, followup_due_at TEXT,
@@ -42,9 +44,25 @@ CREATE TABLE IF NOT EXISTS jobs (
 CREATE TABLE IF NOT EXISTS audit_log (
     id INTEGER PRIMARY KEY AUTOINCREMENT, ts TEXT, ticket_id TEXT, kind TEXT, message TEXT,
     call_id INTEGER, event_id TEXT, data TEXT);
+CREATE TABLE IF NOT EXISTS users (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    username TEXT UNIQUE NOT NULL COLLATE NOCASE,
+    password_hash TEXT NOT NULL,
+    salt TEXT NOT NULL,
+    role TEXT DEFAULT 'admin',
+    full_name TEXT,
+    is_active INTEGER DEFAULT 1,
+    created_at TEXT,
+    last_login TEXT);
+CREATE TABLE IF NOT EXISTS auth_tokens (
+    token TEXT PRIMARY KEY,
+    username TEXT NOT NULL,
+    created_at TEXT,
+    expires_at REAL);
 CREATE INDEX IF NOT EXISTS idx_calls_ticket ON calls(ticket_id);
 CREATE INDEX IF NOT EXISTS idx_jobs_due ON jobs(status, run_at);
 CREATE INDEX IF NOT EXISTS idx_audit_ticket ON audit_log(ticket_id);
+CREATE INDEX IF NOT EXISTS idx_tokens_expires ON auth_tokens(expires_at);
 """
 
 _conn = None
@@ -64,9 +82,21 @@ def connect(path=None):
         _cols_t = [r[1] for r in _conn.execute("PRAGMA table_info(tickets)")]
         if "uc1_reject_reason" not in _cols_t:
             _conn.execute("ALTER TABLE tickets ADD COLUMN uc1_reject_reason TEXT")
+        if "alert_id" not in _cols_t:
+            _conn.execute("ALTER TABLE tickets ADD COLUMN alert_id TEXT")
+        if "region" not in _cols_t:
+            _conn.execute("ALTER TABLE tickets ADD COLUMN region TEXT")
+        if "country_code" not in _cols_t:
+            _conn.execute("ALTER TABLE tickets ADD COLUMN country_code TEXT")
         _cols_c = [r[1] for r in _conn.execute("PRAGMA table_info(calls)")]
         if "reject_reason" not in _cols_c:
             _conn.execute("ALTER TABLE calls ADD COLUMN reject_reason TEXT")
+        # Seed default user if none exists
+        count = _conn.execute("SELECT COUNT(*) FROM users").fetchone()[0]
+        if count == 0:
+            def_user = CFG.get("auth_username") or "admin"
+            def_pass = CFG.get("auth_password") or "admin123"
+            create_user(def_user, def_pass, role="admin", full_name="Administrator")
 
 
 def _keep_v1_tables():
@@ -127,7 +157,7 @@ def audit(ticket_id, kind, message, call_id=None, event_id=None, data=None):
 
 
 def get_ticket(ticket_id):
-    t = q("SELECT * FROM tickets WHERE ticket_id=?", (ticket_id,), one=True)
+    t = q("SELECT * FROM tickets WHERE ticket_id=? OR alert_id=? OR alarm_id=?", (ticket_id, ticket_id, ticket_id), one=True)
     if t:
         t["recipients"] = json.loads(t["recipients"] or "{}")
     return t
@@ -150,3 +180,60 @@ def get_call(call_id):
 def update_call(call_id, **fields):
     cols = ", ".join(f"{k}=?" for k in fields)
     q(f"UPDATE calls SET {cols} WHERE id=?", (*fields.values(), call_id))
+
+
+# --------------------------------------------------------------------------- Authentication & User Management
+def _hash_password(password, salt=None):
+    if not salt:
+        salt = secrets.token_hex(16)
+    h = hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), salt.encode("utf-8"), 100000).hex()
+    return h, salt
+
+
+def create_user(username, password, role="admin", full_name="Administrator"):
+    pwd_hash, salt = _hash_password(password)
+    now = now_iso()
+    q("INSERT OR REPLACE INTO users (username, password_hash, salt, role, full_name, is_active, created_at) "
+      "VALUES (?, ?, ?, ?, ?, 1, ?)",
+      (username.strip(), pwd_hash, salt, role, full_name, now))
+    return {"username": username.strip(), "role": role, "full_name": full_name}
+
+
+def verify_user(username, password):
+    if not username or not password:
+        return None
+    u = q("SELECT * FROM users WHERE username = ? COLLATE NOCASE AND is_active = 1", (username.strip(),), one=True)
+    if u:
+        h, _ = _hash_password(password, u["salt"])
+        if h == u["password_hash"]:
+            q("UPDATE users SET last_login = ? WHERE id = ?", (now_iso(), u["id"]))
+            return dict(u)
+
+    # Fallback / sync from .env configuration
+    env_user = CFG.get("auth_username") or "admin"
+    env_pass = CFG.get("auth_password") or "admin123"
+    if env_user and env_pass and username.strip().lower() == env_user.lower() and password == env_pass:
+        create_user(username.strip(), password, role="admin", full_name="Administrator")
+        return {"username": username.strip(), "role": "admin", "full_name": "Administrator"}
+    return None
+
+
+def create_auth_token(username, ttl_sec=86400):
+    token = secrets.token_urlsafe(32)
+    expires_at = time.time() + ttl_sec
+    q("INSERT OR REPLACE INTO auth_tokens (token, username, created_at, expires_at) VALUES (?, ?, ?, ?)",
+      (token, username.strip(), now_iso(), expires_at))
+    return token, ttl_sec
+
+
+def verify_auth_token(token):
+    if not token:
+        return None
+    row = q("SELECT * FROM auth_tokens WHERE token = ?", (str(token).strip(),), one=True)
+    if not row:
+        return None
+    if row["expires_at"] and row["expires_at"] < time.time():
+        q("DELETE FROM auth_tokens WHERE token = ?", (str(token).strip(),))
+        return None
+    return row["username"]
+

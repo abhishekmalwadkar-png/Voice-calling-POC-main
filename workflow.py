@@ -24,7 +24,7 @@ EVENT_TYPES = {
     "ASSIGNMENT_CREATED", "REASSIGNED", "ASSIGNMENT_ACCEPTED", "ASSIGNMENT_REJECTED",
     "OPERATIONAL_STATUS", "ALARM_STATUS", "TICKET_CREATED", "TICKET_UPDATED", "SEVERITY_CHANGED", "TICKET_CLOSED",
 }
-TICKET_FIELDS = ("ticket_id", "alarm_id", "assignment_id", "site_number", "site_name", "severity", "status",
+TICKET_FIELDS = ("ticket_id", "alert_id", "alarm_id", "assignment_id", "site_number", "site_name", "severity", "status", "region", "country_code",
                  "alarm_status", "operational_status", "description")
 CALLED_ROLES = ("technician", "team_leader", "manager")
 E164 = re.compile(r"\+[1-9]\d{7,14}")
@@ -123,7 +123,8 @@ def normalize_event(p):
         lang = str(r.get("language") or "").strip().lower()
         if lang and lang != "ask" and lang not in texts.LANGS:
             raise EventError(f"recipient '{role}' language must be one of {', '.join(texts.LANGS)} or 'ask'")
-        recipients[role] = {"name": str(r.get("name") or "").strip(), "mobile": mobile, "language": lang}
+        recipients[role] = {"name": str(r.get("name") or "").strip(), "mobile": mobile, "language": lang,
+                            "id": str(r.get("id") or r.get(f"{role}_id") or "").strip()}
 
     if ev["event_type"] in ("ASSIGNMENT_CREATED", "REASSIGNED"):
         if not fields.get("assignment_id"):
@@ -1107,10 +1108,10 @@ def ticket_view(tid):
     for j in timers:
         j["due_at"] = iso_at(j.pop("run_at"))
     return {
-        "ticket_id": t["ticket_id"], "alarm_id": t["alarm_id"], "assignment_id": t["assignment_id"],
+        "ticket_id": t["ticket_id"], "alert_id": t.get("alert_id") or t["alarm_id"], "alarm_id": t["alarm_id"], "assignment_id": t["assignment_id"],
         "site_number": t["site_number"], "site_name": t["site_name"], "severity": t["severity"],
         "status": t["status"], "alarm_status": t["alarm_status"], "operational_status": t["operational_status"],
-        "description": t["description"], "ack_digit": t["ack_digit"], "reject_digit": t["reject_digit"],
+        "description": t["description"], "ack_digit": t["ack_digit"], "reject_digit": t["reject_digit"], "dtmf_pressed": (tech[-1].get("dtmf") if tech else None), "ack_number_pressed": (tech[-1].get("dtmf") if tech else None), "acknowledged": (t["uc1_state"] == "ACKNOWLEDGED"),
         "version": t["version"], "last_event_id": t["last_event_id"], "last_event_time": t["last_event_time"],
         "recipients": t["recipients"], "callback_url": t["callback_url"],
         "call_workflow": {
@@ -1231,3 +1232,569 @@ def _deliver(tid, event, url, body):
             result = f"failed ({type(e).__name__}, attempt {n})"
     audit(tid, "webhook_delivered" if result.startswith("delivered") else "webhook_failed",
           f"{event} -> {url}: {result}")
+
+
+# =========================================================================== Alert Intake API (Single & Batch)
+def _format_e164(phone, default_country="+966"):
+    """Ensure phone number conforms to E.164, applying country_code if missing prefix."""
+    if not phone:
+        return ""
+    p = "".join(str(phone).split())
+    if not p:
+        return ""
+    if p.startswith("+"):
+        return p
+    c = str(default_country or "+966").strip()
+    if not c.startswith("+"):
+        c = "+" + c
+    digits_only = re.sub(r"\D", "", p)
+    if digits_only.startswith("0"):
+        digits_only = digits_only[1:]
+    return f"{c}{digits_only}"
+
+
+def _normalize_lang(l, default="en"):
+    if not l:
+        return default
+    s = str(l).strip().lower()
+    if s in ("arabic", "ar"):
+        return "ar"
+    if s in ("english", "en"):
+        return "en"
+    if s in ("urdu", "ur"):
+        return "ur"
+    if s in ("hindi", "hi"):
+        return "hi"
+    if s in ("ask", "menu"):
+        return "ask"
+    return s[:2] if len(s) >= 2 else default
+
+
+def normalize_intake_alert(item):
+    """Normalize a single alert object (flat, human-readable, or nested NexTask event)
+    supporting all architectural variations:
+    - 14 fields architecture
+    - Nested ticket: {ticket_id, alarm_id, issue_description, severity, ticket_status, alarm_status}
+    - Nested branch: {branch_id, branch_name, site_number}
+    - Nested assignment: {assignment_id, assignment_type, assigned_at}
+    - Nested acknowledgement: {dtmf_digit}
+    - Nested technician, team_leader, manager, emergency_contacts
+    - Preserves BOTH ticket_id and alert_id (and alarm_id)
+    Returns: (event_dict, normalized_alert_dict) or raises EventError.
+    """
+    if not isinstance(item, dict):
+        raise EventError("alert item must be a JSON object")
+
+    ticket_dict = item.get("ticket") if isinstance(item.get("ticket"), dict) else {}
+    assignment_dict = item.get("assignment") if isinstance(item.get("assignment"), dict) else (item.get("assignment_details") if isinstance(item.get("assignment_details"), dict) else {})
+    branch_dict = item.get("branch") if isinstance(item.get("branch"), dict) else (item.get("site") if isinstance(item.get("site"), dict) else {})
+    ack_dict = item.get("acknowledgement") if isinstance(item.get("acknowledgement"), dict) else {}
+
+    # Build clean-key map to match keys regardless of case, underscores, spaces, or parentheses
+    key_map = {}
+    for source in (branch_dict, assignment_dict, ack_dict, ticket_dict, item):
+        for k, val in source.items():
+            if not isinstance(val, dict):
+                clean = re.sub(r"[^a-zA-Z0-9]", "", str(k)).lower()
+                key_map[clean] = val
+
+    def _get(*keys, default=""):
+        for k in keys:
+            clean = re.sub(r"[^a-zA-Z0-9]", "", str(k)).lower()
+            if clean in key_map:
+                val = key_map[clean]
+                if val is not None and str(val).strip() != "":
+                    return val
+        return default
+
+    # 4. Alert ID, Ticket ID & Alarm ID - preserve BOTH
+    raw_ticket_id = str(_get("ticket_id", "incident_id", "incident_number", "ticket", default="")).strip().upper()
+    raw_alert_id = str(_get("alert_id", "alertid", "alarm_id", "alarmid", default="")).strip()
+    if not raw_ticket_id and not raw_alert_id:
+        raise EventError("missing required field: ticket_id or alert_id")
+    ticket_id = raw_ticket_id or raw_alert_id.upper()
+    alert_id = raw_alert_id or ticket_id
+    alarm_id = str(_get("alarm_id", "alarmid", default=alert_id)).strip()
+
+    # 1. Region
+    region = str(_get("region", "region_name", "region_id", default="")).strip()
+
+    # 2. Site Name & Site Number
+    site_name = str(_get("site_name", "branch_name", "site_details", "site", "site_number_name", default="")).strip()
+    site_number = str(_get("site_number", "branch_id", "site_id", default="")).strip()
+    if not site_name and not site_number:
+        raise EventError(f"[{alert_id}] missing required field: site_name or site_number")
+    if not site_name:
+        site_name = f"Site {site_number}"
+
+    # 3. Description
+    description = str(_get("issue_description", "description", "issue", "alarm_type", "short_description", "fault_type", default="")).strip()
+    if not description:
+        raise EventError(f"[{alert_id}] missing required field: description (or issue / alarm_type)")
+
+    # 11. Severity
+    severity = str(_get("severity", "priority", default="Major")).strip()
+
+    # 13. Country Code
+    country_code = str(_get("country_code", default="+966")).strip()
+    if country_code and not country_code.startswith("+"):
+        country_code = "+" + country_code
+
+    # 14. Alert Status & Ticket Status
+    alert_status = str(_get("alert_status", "alarm_status", "status", "ticket_status", default="Active")).strip()
+    ticket_status = str(_get("ticket_status", "status", "alert_status", default="Assigned")).strip()
+
+    # 12. Date & Time
+    date_time = str(_get("date_time", "event_timestamp", "timestamp", "assigned_at", "date_and_time", "event_time", "created_at",
+                         default=now_iso())).strip()
+
+    # 5 & 6. Technician Name, Number & Language
+    raw_recipients = item.get("recipients") or []
+    tech_info = {}
+    tl_info = {}
+    mgr_info = {}
+
+    if isinstance(raw_recipients, list):
+        for r in raw_recipients:
+            if isinstance(r, dict) and r.get("role"):
+                role = str(r["role"]).strip().lower()
+                if role in ("technician", "engineer"):
+                    tech_info = r
+                elif role in ("team_leader", "tl"):
+                    tl_info = r
+                elif role in ("manager", "mgr"):
+                    mgr_info = r
+    elif isinstance(raw_recipients, dict):
+        tech_info = raw_recipients.get("technician") or raw_recipients.get("engineer") or {}
+        tl_info = raw_recipients.get("team_leader") or raw_recipients.get("tl") or {}
+        mgr_info = raw_recipients.get("manager") or raw_recipients.get("mgr") or {}
+
+    tech_dict = item.get("technician") if isinstance(item.get("technician"), dict) else {}
+    tech_id = str(tech_dict.get("technician_id") or tech_dict.get("eng_id") or tech_dict.get("id") or tech_info.get("id") or _get("technician_id", "engineer_id", "tech_id", default="")).strip()
+    tech_name = str(tech_dict.get("name") or tech_info.get("name") or _get("technician_name", "engineer_name", "tech_name", "technician", default="")).strip()
+    tech_mob = str(tech_dict.get("mobile_number") or tech_dict.get("mobile") or tech_dict.get("phone") or
+                   tech_info.get("mobile_number") or tech_info.get("mobile") or
+                   _get("technician_number", "technician_mobile", "phone_number", "engineer_mobile", "tech_mobile", "mobile", default="")).strip()
+    raw_tech_lang = tech_dict.get("preferred_language") or tech_dict.get("language") or tech_info.get("preferred_language") or tech_info.get("language") or _get("technician_language", "language", default="ask")
+    tech_lang = _normalize_lang(raw_tech_lang, default="ask")
+
+    if not tech_mob:
+        raise EventError(f"[{alert_id}] missing required field: technician_number (or technician_mobile)")
+    tech_mob = _format_e164(tech_mob, country_code)
+
+    recipients = [{
+        "role": "technician",
+        "id": tech_id,
+        "name": tech_name,
+        "mobile": tech_mob,
+        "language": tech_lang
+    }]
+
+    # 7 & 8. Team Leader (TL) Name & Number
+    tl_dict = item.get("team_leader") if isinstance(item.get("team_leader"), dict) else {}
+    tl_id = str(tl_dict.get("team_leader_id") or tl_dict.get("tl_id") or tl_dict.get("id") or tl_info.get("id") or _get("team_leader_id", "tl_id", default="")).strip()
+    tl_name = str(tl_dict.get("name") or tl_info.get("name") or _get("team_leader_name", "team_leader_tl_name", "tl_name", "team_leader", default="")).strip()
+    tl_mob = str(tl_dict.get("mobile_number") or tl_dict.get("mobile") or tl_dict.get("phone") or
+                 tl_info.get("mobile_number") or tl_info.get("mobile") or
+                 _get("team_leader_number", "team_leader_tl_number", "team_leader_mobile", "tl_mobile", "tl_number", default="")).strip()
+    raw_tl_lang = tl_dict.get("preferred_language") or tl_dict.get("language") or tl_info.get("preferred_language") or tl_info.get("language") or _get("team_leader_language", default="en")
+    tl_lang = _normalize_lang(raw_tl_lang, default="en")
+
+    if tl_mob:
+        recipients.append({
+            "role": "team_leader",
+            "id": tl_id,
+            "name": tl_name,
+            "mobile": _format_e164(tl_mob, country_code),
+            "language": tl_lang
+        })
+
+    # 9 & 10. Manager Name & Number
+    mgr_dict = item.get("manager") if isinstance(item.get("manager"), dict) else {}
+    mgr_id = str(mgr_dict.get("manager_id") or mgr_dict.get("mgr_id") or mgr_dict.get("id") or mgr_info.get("id") or _get("manager_id", "mgr_id", default="")).strip()
+    mgr_name = str(mgr_dict.get("name") or mgr_info.get("name") or _get("manager_name", "mgr_name", "manager", default="")).strip()
+    mgr_mob = str(mgr_dict.get("mobile_number") or mgr_dict.get("mobile") or mgr_dict.get("phone") or
+                  mgr_info.get("mobile_number") or mgr_info.get("mobile") or
+                  _get("manager_number", "manager_mobile", "mgr_mobile", "mgr_number", default="")).strip()
+    raw_mgr_lang = mgr_dict.get("preferred_language") or mgr_dict.get("language") or mgr_info.get("preferred_language") or mgr_info.get("language") or _get("manager_language", default="en")
+    mgr_lang = _normalize_lang(raw_mgr_lang, default="en")
+
+    if mgr_mob:
+        recipients.append({
+            "role": "manager",
+            "id": mgr_id,
+            "name": mgr_name,
+            "mobile": _format_e164(mgr_mob, country_code),
+            "language": mgr_lang
+        })
+
+    # Optional Emergency Contacts / SPOC
+    em_contacts = item.get("emergency_contacts") if isinstance(item.get("emergency_contacts"), dict) else {}
+    spoc_name = str(_get("spoc_name", default="SPOC")).strip()
+    spoc_mob = str(em_contacts.get("spoc") or _get("spoc_number", "spoc_mobile", "spoc", default="")).strip()
+    if spoc_mob:
+        recipients.append({
+            "role": "spoc",
+            "id": "SPOC",
+            "name": spoc_name or "SPOC",
+            "mobile": _format_e164(spoc_mob, country_code),
+            "language": "en"
+        })
+
+    stamp = int(time.time() * 1000)
+    assignment_id = str(_get("assignment_id", default=f"{ticket_id}-A{stamp}")).strip()
+
+    # Event version
+    raw_ver = _get("event_version", "version", default="")
+    version = int(raw_ver) if str(raw_ver).strip().isdigit() else None
+
+    # Acknowledgement digit
+    ack_digit = str(_get("dtmf_digit", "dtmf_acknowledgement_digit", "ack_digit", default="1")).strip()
+
+    event = {
+        "event_id": str(_get("event_id", default=f"INTAKE-{ticket_id}-{stamp}")).strip(),
+        "event_type": ("REASSIGNED" if str(_get("event_type", default="ASSIGNMENT_CREATED")).strip().upper() in ("ASSIGNMENT_REASSIGNED", "REASSIGN", "REASSIGNMENT") else str(_get("event_type", default="ASSIGNMENT_CREATED")).strip().upper()),
+        "event_time": date_time,
+        "version": version,
+        "ack_digit": ack_digit,
+        "reject_digit": str(_get("reject_digit", default="9")).strip(),
+        "callback_url": _get("callback_url", default=None),
+        "ticket": {
+            "ticket_id": ticket_id,
+            "alert_id": alert_id,
+            "alarm_id": alarm_id,
+            "assignment_id": assignment_id,
+            "site_number": site_number,
+            "site_name": site_name,
+            "region": region,
+            "country_code": country_code,
+            "severity": severity,
+            "status": ticket_status,
+            "alarm_status": alert_status,
+            "description": description
+        },
+        "recipients": recipients
+    }
+
+    # Normalized dictionary containing all fields + ticket_id + alert_id
+    normalized = {
+        "ticket_id": ticket_id,
+        "alert_id": alert_id,
+        "alarm_id": alarm_id,
+        "region": region,
+        "site_name": site_name,
+        "site_number": site_number,
+        "description": description,
+        "technician_name": tech_name,
+        "technician_number": tech_mob,
+        "team_leader_name": tl_name,
+        "team_leader_number": _format_e164(tl_mob, country_code) if tl_mob else "",
+        "manager_name": mgr_name,
+        "manager_number": _format_e164(mgr_mob, country_code) if mgr_mob else "",
+        "severity": severity,
+        "date_time": date_time,
+        "country_code": country_code,
+        "alert_status": alert_status,
+        "ack_digit": ack_digit,
+        "recipients": {r["role"]: r for r in recipients}
+    }
+
+    return event, normalized
+
+
+def handle_alert_intake(payload):
+    """Handles alert intake for both single alert (dict) or multiple alerts (list / dict with 'alerts').
+    Returns: (http_code, response_json)
+    """
+    if isinstance(payload, dict):
+        if "alerts" in payload and isinstance(payload["alerts"], list):
+            items = payload["alerts"]
+            is_batch = True
+            # Propagate parent context (branch, timestamp, batch_id) to each alert if missing
+            parent_branch = payload.get("branch") if isinstance(payload.get("branch"), dict) else None
+            parent_time = payload.get("event_timestamp") or payload.get("timestamp") or payload.get("date_time")
+            parent_batch_id = payload.get("batch_id")
+            for it in items:
+                if isinstance(it, dict):
+                    if parent_branch and "branch" not in it:
+                        it["branch"] = parent_branch
+                    if parent_time and "event_timestamp" not in it and "date_time" not in it:
+                        it["event_timestamp"] = parent_time
+                    if parent_batch_id and "batch_id" not in it:
+                        it["batch_id"] = parent_batch_id
+        else:
+            items = [payload]
+            is_batch = False
+    elif isinstance(payload, list):
+        items = payload
+        is_batch = True
+    else:
+        return 400, {
+            "status": "error",
+            "error": "body must be a JSON object or array of alert objects"
+        }
+
+    if not items:
+        return 400, {
+            "status": "error",
+            "error": "no alerts provided in request body"
+        }
+
+    results = []
+    success_count = 0
+    fail_count = 0
+
+    for idx, item in enumerate(items):
+        try:
+            event, normalized = normalize_intake_alert(item)
+            code, body = ingest_event(event)
+            t = get_ticket(normalized["ticket_id"])
+            ack_digit = t["ack_digit"] if t else str(event.get("ack_digit") or "1")
+            reject_digit = t["reject_digit"] if t else str(event.get("reject_digit") or "9")
+            latest_call = q("SELECT dtmf, ack_result, outcome FROM calls WHERE ticket_id=? AND role='technician' ORDER BY id DESC LIMIT 1", (normalized["ticket_id"],), one=True) if t else None
+            dtmf_pressed = latest_call["dtmf"] if (latest_call and latest_call["dtmf"]) else None
+            acknowledged = (t["uc1_state"] == "ACKNOWLEDGED") if t else False
+            alert_entry = {
+                **normalized,
+                "ack_digit": ack_digit,
+                "reject_digit": reject_digit,
+                "dtmf_pressed": dtmf_pressed,
+                "ack_number_pressed": dtmf_pressed,
+                "acknowledged": acknowledged
+            }
+            results.append({
+                "index": idx,
+                "ticket_id": normalized["ticket_id"],
+                "alert_id": normalized["alert_id"],
+                "ack_digit": ack_digit,
+                "reject_digit": reject_digit,
+                "dtmf_pressed": dtmf_pressed,
+                "ack_number_pressed": dtmf_pressed,
+                "acknowledged": acknowledged,
+                "status": body.get("result") or ("accepted" if code in (200, 202) else "error"),
+                "http_code": code,
+                "actions": body.get("actions", []),
+                "alert": alert_entry
+            })
+            if code in (200, 202):
+                success_count += 1
+            else:
+                fail_count += 1
+        except EventError as e:
+            fail_count += 1
+            tid = ""
+            if isinstance(item, dict):
+                td = item.get("ticket") if isinstance(item.get("ticket"), dict) else {}
+                tid = item.get("ticket_id") or td.get("ticket_id") or item.get("alert_id") or ""
+            results.append({
+                "index": idx,
+                "ticket_id": tid or f"index_{idx}",
+                "status": "failed",
+                "http_code": 400,
+                "error": str(e),
+                "alert": item if isinstance(item, dict) else {}
+            })
+        except Exception as e:
+            fail_count += 1
+            tid = ""
+            if isinstance(item, dict):
+                td = item.get("ticket") if isinstance(item.get("ticket"), dict) else {}
+                tid = item.get("ticket_id") or td.get("ticket_id") or item.get("alert_id") or ""
+            results.append({
+                "index": idx,
+                "ticket_id": tid or f"index_{idx}",
+                "status": "error",
+                "http_code": 500,
+                "error": f"Internal error: {e}",
+                "alert": item if isinstance(item, dict) else {}
+            })
+
+    if not is_batch:
+        res = results[0]
+        if res["status"] in ("failed", "error"):
+            return res["http_code"], {
+                "status": "error",
+                "mode": "single",
+                "ticket_id": res["ticket_id"],
+                "error": res.get("error", "Failed to process alert"),
+                "alert": res.get("alert")
+            }
+        return res["http_code"], {
+            "status": "success",
+            "message": "Alert accepted and processed",
+            "mode": "single",
+            "ticket_id": res["ticket_id"],
+            "alert_id": res.get("alert_id") or (res.get("alert") or {}).get("alert_id") or res["ticket_id"],
+            "ack_digit": res.get("ack_digit"),
+            "reject_digit": res.get("reject_digit"),
+            "dtmf_pressed": res.get("dtmf_pressed"),
+            "ack_number_pressed": res.get("ack_number_pressed"),
+            "acknowledged": res.get("acknowledged"),
+            "result": res["status"],
+            "actions": res.get("actions", []),
+            "alert": res.get("alert")
+        }
+
+    overall_status = "success" if fail_count == 0 else ("partial_success" if success_count > 0 else "failed")
+    http_code = 200 if fail_count == 0 else (207 if success_count > 0 else 400)
+    return http_code, {
+        "status": overall_status,
+        "mode": "batch",
+        "total": len(items),
+        "successful": success_count,
+        "failed": fail_count,
+        "results": results
+    }
+
+
+def get_alerts_view(payload=None):
+    """Retrieve alerts view for GET /api/getalerts.
+    If payload with alerts is passed, returns status for those alerts.
+    Otherwise returns recent tickets from the database.
+    """
+    items = []
+    if isinstance(payload, dict):
+        if "alerts" in payload and isinstance(payload["alerts"], list):
+            items = payload["alerts"]
+            parent_branch = payload.get("branch") if isinstance(payload.get("branch"), dict) else None
+            parent_time = payload.get("event_timestamp") or payload.get("timestamp") or payload.get("date_time")
+            for it in items:
+                if isinstance(it, dict):
+                    if parent_branch and "branch" not in it:
+                        it["branch"] = parent_branch
+                    if parent_time and "event_timestamp" not in it and "date_time" not in it:
+                        it["event_timestamp"] = parent_time
+        elif "ticket_id" in payload or "alert_id" in payload:
+            items = [payload]
+    elif isinstance(payload, list):
+        items = payload
+
+    results = []
+    if items:
+        for idx, item in enumerate(items):
+            try:
+                ev, norm = normalize_intake_alert(item)
+                tid = norm["ticket_id"]
+                t = get_ticket(tid)
+                if not t:
+                    code, body = ingest_event(ev)
+                    t = get_ticket(tid)
+                    status_val = body.get("result") or "accepted"
+                    http_code = code
+                    actions_val = body.get("actions", [])
+                else:
+                    status_val = "accepted" if t["uc1_state"] in ("TECH_CALLING", "ACKNOWLEDGED") else "duplicate"
+                    http_code = 200
+                    actions_val = []
+
+                ack_digit = t["ack_digit"] if t else norm.get("ack_digit", "1")
+                reject_digit = t["reject_digit"] if t else "9"
+                latest_call = q("SELECT dtmf, ack_result, outcome FROM calls WHERE ticket_id=? AND role='technician' ORDER BY id DESC LIMIT 1", (tid,), one=True) if t else None
+                dtmf_pressed = latest_call["dtmf"] if (latest_call and latest_call["dtmf"]) else None
+                acknowledged = (t["uc1_state"] == "ACKNOWLEDGED") if t else False
+
+                alert_dict = {
+                    **norm,
+                    "ack_digit": ack_digit,
+                    "reject_digit": reject_digit,
+                    "dtmf_pressed": dtmf_pressed,
+                    "ack_number_pressed": dtmf_pressed,
+                    "acknowledged": acknowledged
+                }
+
+                results.append({
+                    "index": idx,
+                    "ticket_id": tid,
+                    "alert_id": norm["alert_id"],
+                    "ack_digit": ack_digit,
+                    "reject_digit": reject_digit,
+                    "dtmf_pressed": dtmf_pressed,
+                    "ack_number_pressed": dtmf_pressed,
+                    "acknowledged": acknowledged,
+                    "status": status_val,
+                    "http_code": http_code,
+                    "actions": actions_val,
+                    "alert": alert_dict
+                })
+            except Exception as e:
+                tid = ""
+                if isinstance(item, dict):
+                    td = item.get("ticket") if isinstance(item.get("ticket"), dict) else {}
+                    tid = item.get("ticket_id") or td.get("ticket_id") or item.get("alert_id") or f"index_{idx}"
+                results.append({
+                    "index": idx,
+                    "ticket_id": tid or f"index_{idx}",
+                    "status": "failed",
+                    "http_code": 400,
+                    "error": str(e),
+                    "alert": item if isinstance(item, dict) else {}
+                })
+    else:
+        rows = q("SELECT ticket_id FROM tickets ORDER BY rowid DESC LIMIT 50")
+        for idx, r in enumerate(rows):
+            tid = r["ticket_id"]
+            t = get_ticket(tid)
+            if not t:
+                continue
+            ack_digit = t["ack_digit"] or "1"
+            reject_digit = t["reject_digit"] or "9"
+            latest_call = q("SELECT dtmf, ack_result, outcome FROM calls WHERE ticket_id=? AND role='technician' ORDER BY id DESC LIMIT 1", (tid,), one=True)
+            dtmf_pressed = latest_call["dtmf"] if (latest_call and latest_call["dtmf"]) else None
+            acknowledged = (t["uc1_state"] == "ACKNOWLEDGED")
+            alert_id = t.get("alert_id") or t.get("alarm_id") or tid
+            recipients = t["recipients"] if isinstance(t["recipients"], dict) else json.loads(t["recipients"] or "{}")
+
+            tech_r = recipients.get("technician") or {}
+            tl_r = recipients.get("team_leader") or {}
+            mgr_r = recipients.get("manager") or {}
+
+            alert_dict = {
+                "ticket_id": tid,
+                "alert_id": alert_id,
+                "alarm_id": t["alarm_id"],
+                "region": t.get("region") or "",
+                "site_name": t["site_name"] or "",
+                "site_number": t["site_number"] or "",
+                "description": t["description"] or "",
+                "technician_name": tech_r.get("name", ""),
+                "technician_number": tech_r.get("mobile", ""),
+                "team_leader_name": tl_r.get("name", ""),
+                "team_leader_number": tl_r.get("mobile", ""),
+                "manager_name": mgr_r.get("name", ""),
+                "manager_number": mgr_r.get("mobile", ""),
+                "severity": t["severity"] or "Major",
+                "date_time": t["last_event_time"] or t["created_at"],
+                "country_code": t.get("country_code") or "+966",
+                "alert_status": t["status"] or "Active",
+                "ack_digit": ack_digit,
+                "recipients": recipients,
+                "reject_digit": reject_digit,
+                "dtmf_pressed": dtmf_pressed,
+                "ack_number_pressed": dtmf_pressed,
+                "acknowledged": acknowledged
+            }
+
+            results.append({
+                "index": idx,
+                "ticket_id": tid,
+                "alert_id": alert_id,
+                "ack_digit": ack_digit,
+                "reject_digit": reject_digit,
+                "dtmf_pressed": dtmf_pressed,
+                "ack_number_pressed": dtmf_pressed,
+                "acknowledged": acknowledged,
+                "status": "duplicate" if t["uc1_state"] in FINAL else "accepted",
+                "http_code": 200,
+                "actions": [],
+                "alert": alert_dict
+            })
+
+    return {
+        "status": "success",
+        "mode": "batch",
+        "total": len(results),
+        "successful": sum(1 for r in results if r["http_code"] in (200, 202)),
+        "failed": sum(1 for r in results if r["http_code"] not in (200, 202)),
+        "results": results
+    }
+

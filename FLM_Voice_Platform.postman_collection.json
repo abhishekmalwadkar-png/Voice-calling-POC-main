@@ -73,9 +73,233 @@
     {
       "key": "legacy_ticket_id",
       "value": "INC0099050"
+    },
+    {
+      "key": "auth_username",
+      "value": "admin"
+    },
+    {
+      "key": "auth_password",
+      "value": "admin123"
+    },
+    {
+      "key": "auth_token",
+      "value": ""
     }
   ],
   "item": [
+    {
+      "name": "0. Authentication & Authorization (/api/authenticate & /api/authorize)",
+      "item": [
+        {
+          "name": "1. Authenticate (login with username & password)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "var data = pm.response.json();",
+                  "if (pm.response.code === 200 && data.token) {",
+                  "    pm.collectionVariables.set(\"auth_token\", data.token);",
+                  "}",
+                  "if (pm.response.code === 200 && data.api_key) {",
+                  "    pm.collectionVariables.set(\"api_key\", data.api_key);",
+                  "}"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "noauth"
+            },
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"username\": \"{{auth_username}}\",\n  \"password\": \"{{auth_password}}\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/authenticate",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "authenticate"
+              ]
+            },
+            "description": "Pass username and password to authenticate. Returns session Bearer token and sets auth_token / api_key automatically."
+          }
+        },
+        {
+          "name": "2. Verify Authorization (GET /api/authorize)",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{auth_token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/authorize",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "authorize"
+              ]
+            },
+            "description": "Verifies if the current Bearer token or API key is valid and authorized. Returns user profile and authorization status."
+          }
+        },
+        {
+          "name": "3. Authorize with Credentials (POST /api/authorize)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "var data = pm.response.json();",
+                  "if (pm.response.code === 200 && data.token) {",
+                  "    pm.collectionVariables.set(\"auth_token\", data.token);",
+                  "}"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "noauth"
+            },
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"username\": \"{{auth_username}}\",\n  \"password\": \"{{auth_password}}\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/authorize",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "authorize"
+              ]
+            },
+            "description": "Directly authorizes user credentials, returns authorization status and issues an active session token."
+          }
+        }
+      ]
+    },
+    {
+      "name": "0. Alert Intake (POST /api/alerts)",
+      "item": [
+        {
+          "name": "1. Shabakkat KSA NexTask Alert Intake (POST /api/alerts)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"region\": \"Riyadh\",\n  \"site_name\": \"Site A\",\n  \"description\": \"Generator Failure - Main Power Outage\",\n  \"alert_id\": \"AL12345\",\n  \"technician_name\": \"Ahmed Al-Harbi\",\n  \"technician_number\": \"0500000001\",\n  \"team_leader_name\": \"Imran Khan\",\n  \"team_leader_number\": \"0500000002\",\n  \"manager_name\": \"Sara Al-Otaibi\",\n  \"manager_number\": \"0500000003\",\n  \"severity\": \"Critical\",\n  \"date_time\": \"2026-10-30T10:00:00+03:00\",\n  \"country_code\": \"+966\",\n  \"alert_status\": \"Active\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/alerts",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "alerts"
+              ]
+            },
+            "description": "Exact 14-field integration payload from NexTask as depicted in the Shabakkat KSA Architecture diagram."
+          }
+        },
+        {
+          "name": "1. Single Alert Intake (Voice Call Alert)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"alarm_id\": \"ALM-99120\",\n  \"site_number\": \"2040\",\n  \"site_name\": \"Olaya Branch\",\n  \"description\": \"Generator Failure - Main Power Outage\",\n  \"severity\": \"Critical\",\n  \"ticket_id\": \"INC0012345\",\n  \"ticket_status\": \"Assigned\",\n  \"alarm_status\": \"Active\",\n  \"technician_id\": \"TECH-101\",\n  \"technician_name\": \"Ahmed Al-Harbi\",\n  \"technician_mobile\": \"+966500000001\",\n  \"team_leader_id\": \"TL-201\",\n  \"team_leader_name\": \"Imran Khan\",\n  \"team_leader_mobile\": \"+966500000002\",\n  \"manager_id\": \"MGR-301\",\n  \"manager_name\": \"Sara Al-Otaibi\",\n  \"manager_mobile\": \"+966500000003\",\n  \"region\": \"Central - Riyadh\",\n  \"country_code\": \"+966\",\n  \"date_time\": \"2026-10-29T11:00:00+03:00\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/alerts/intake",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "alerts",
+                "intake"
+              ]
+            },
+            "description": "Single alert intake with all 12 required/standard fields from Shabakat-Ksa_RequiredField.xlsx."
+          }
+        },
+        {
+          "name": "2. Multiple Alerts Intake (Batch JSON Array)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "[\n  {\n    \"ticket_id\": \"INC0012346\",\n    \"alarm_id\": \"ALM-99121\",\n    \"site_number\": \"2041\",\n    \"site_name\": \"Jeddah Corniche\",\n    \"description\": \"HVAC Main Cooling Plant Down\",\n    \"severity\": \"Major\",\n    \"ticket_status\": \"Assigned\",\n    \"alarm_status\": \"Active\",\n    \"technician_name\": \"Khalid\",\n    \"technician_mobile\": \"+966501112233\",\n    \"region\": \"Western - Jeddah\",\n    \"country_code\": \"+966\"\n  },\n  {\n    \"ticket_id\": \"INC0012347\",\n    \"alarm_id\": \"ALM-99122\",\n    \"site_number\": \"2042\",\n    \"site_name\": \"Dammam Port Station\",\n    \"description\": \"Fiber Cut to Base Station\",\n    \"severity\": \"Critical\",\n    \"ticket_status\": \"Assigned\",\n    \"alarm_status\": \"Active\",\n    \"technician_name\": \"Fahad\",\n    \"technician_mobile\": \"+966502223344\",\n    \"region\": \"Eastern - Dammam\",\n    \"country_code\": \"+966\"\n  }\n]"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/alerts/intake",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "alerts",
+                "intake"
+              ]
+            },
+            "description": "Batch alert intake passing multiple alerts in a JSON array. Processes all alerts and returns summary with per-item status."
+          }
+        }
+      ]
+    },
     {
       "name": "1. Events (POST /api/events)",
       "item": [
