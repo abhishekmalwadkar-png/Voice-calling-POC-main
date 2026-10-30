@@ -1562,10 +1562,16 @@ def handle_alert_intake(payload):
                 "ack_number_pressed": dtmf_pressed,
                 "acknowledged": acknowledged
             }
+            event_id = str(event.get("event_id") or normalized.get("event_id") or "").strip()
+            event_timestamp = str(event.get("event_time") or normalized.get("date_time") or "").strip()
             results.append({
                 "index": idx,
                 "ticket_id": normalized["ticket_id"],
                 "alert_id": normalized["alert_id"],
+                "event_id": event_id,
+                "event_timestamp": event_timestamp,
+                "event_time": event_timestamp,
+                "timestamp": event_timestamp,
                 "ack_digit": ack_digit,
                 "reject_digit": reject_digit,
                 "dtmf_pressed": dtmf_pressed,
@@ -1625,6 +1631,10 @@ def handle_alert_intake(payload):
             "mode": "single",
             "ticket_id": res["ticket_id"],
             "alert_id": res.get("alert_id") or (res.get("alert") or {}).get("alert_id") or res["ticket_id"],
+            "event_id": res.get("event_id") or (res.get("alert") or {}).get("event_id") or "",
+            "event_timestamp": res.get("event_timestamp") or (res.get("alert") or {}).get("date_time") or "",
+            "event_time": res.get("event_timestamp") or (res.get("alert") or {}).get("date_time") or "",
+            "timestamp": res.get("event_timestamp") or (res.get("alert") or {}).get("date_time") or "",
             "ack_digit": res.get("ack_digit"),
             "reject_digit": res.get("reject_digit"),
             "dtmf_pressed": res.get("dtmf_pressed"),
@@ -1702,10 +1712,16 @@ def get_alerts_view(payload=None):
                     "acknowledged": acknowledged
                 }
 
+                evt_id = str(item.get("event_id") or norm.get("event_id") or (t.get("last_event_id") if t else "") or "").strip()
+                evt_time = str(item.get("event_timestamp") or item.get("timestamp") or norm.get("date_time") or (t.get("last_event_time") if t else "") or "").strip()
                 results.append({
                     "index": idx,
                     "ticket_id": tid,
                     "alert_id": norm["alert_id"],
+                    "event_id": evt_id,
+                    "event_timestamp": evt_time,
+                    "event_time": evt_time,
+                    "timestamp": evt_time,
                     "ack_digit": ack_digit,
                     "reject_digit": reject_digit,
                     "dtmf_pressed": dtmf_pressed,
@@ -1778,6 +1794,10 @@ def get_alerts_view(payload=None):
                 "index": idx,
                 "ticket_id": tid,
                 "alert_id": alert_id,
+                "event_id": t.get("last_event_id") or f"EVT-{tid}",
+                "event_timestamp": t.get("last_event_time") or t.get("created_at") or "",
+                "event_time": t.get("last_event_time") or t.get("created_at") or "",
+                "timestamp": t.get("last_event_time") or t.get("created_at") or "",
                 "ack_digit": ack_digit,
                 "reject_digit": reject_digit,
                 "dtmf_pressed": dtmf_pressed,
