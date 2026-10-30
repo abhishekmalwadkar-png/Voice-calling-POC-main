@@ -10,11 +10,12 @@
 2. [Authorization API (`/api/authorize`)](#2-authorization-api)
 3. [Authentication API (`/api/authenticate`)](#3-authentication-api)
 4. [Alert Intake API (`/api/alerts`)](#4-alert-intake-api)
-5. [Get Alerts API (`/api/getalerts`)](#5-get-alerts-api)
-6. [Twilio Webhooks](#6-twilio-webhooks)
-   - [Voice Callback (`/twilio/voice`)](#61-voice-callback)
-   - [Call Status Callback (`/twilio/call-status`)](#62-status-callback)
-7. [Error Handling & HTTP Status Codes](#7-error-handling--http-status-codes)
+5. [Field Mapping: Previous vs Additional Fields & Data Types](#5-field-mapping-previous-vs-additional-fields--data-types)
+6. [Get Alerts API (`/api/getalerts`)](#6-get-alerts-api)
+7. [Twilio Webhooks](#7-twilio-webhooks)
+   - [Voice Callback (`/twilio/voice`)](#71-voice-callback)
+   - [Call Status Callback (`/twilio/call-status`)](#72-status-callback)
+8. [Error Handling & HTTP Status Codes](#8-error-handling--http-status-codes)
 
 ---
 
@@ -35,7 +36,7 @@ sequenceDiagram
     Note over Client,Gateway: Step 2: Trigger Alert Voice Calls
     Client->>Gateway: POST /api/alerts (Header: X-API-Key: <YOUR_API_KEY>, Body: Batch Alert JSON)
     Gateway->>Twilio: Initiate Outbound Call
-    Gateway-->>Client: 200 OK (accepted, scheduled calls)
+    Gateway-->>Client: 200 OK (accepted, scheduled calls with event_id & event_timestamp)
 
     Note over Twilio,Engineer: Step 3: Call & DTMF Acknowledgment
     Twilio->>Engineer: Voice Call (Arabic / English prompt)
@@ -222,6 +223,8 @@ Ingests a single ticket or an entire batch of network/power/HVAC alerts, creates
 ```
 
 ### Success Response (`200 OK`)
+Notice that each result item explicitly returns **`event_id`**, **`event_timestamp`**, and **`timestamp`** indicating when that event was generated.
+
 ```json
 {
   "status": "success",
@@ -242,9 +245,13 @@ Ingests a single ticket or an entire batch of network/power/HVAC alerts, creates
       "index": 0,
       "ticket_id": "INC1001",
       "alert_id": "ALT1001",
+      "event_id": "EVT001",
+      "event_timestamp": "2026-10-30T10:30:00+03:00",
+      "timestamp": "2026-10-30T10:30:00+03:00",
       "ack_digit": "1",
       "reject_digit": "9",
       "dtmf_pressed": null,
+      "ack_number_pressed": null,
       "acknowledged": false,
       "status": "accepted",
       "http_code": 202,
@@ -256,11 +263,14 @@ Ingests a single ticket or an entire batch of network/power/HVAC alerts, creates
         "ticket_id": "INC1001",
         "alert_id": "ALT1001",
         "alarm_id": "ALM5001",
+        "event_id": "EVT001",
+        "date_time": "2026-10-30T10:30:00+03:00",
         "site_name": "Riyadh Main Office",
         "site_number": "SITE001",
         "description": "Network connectivity failure",
         "technician_name": "Ali",
-        "technician_number": "+9665XXXXXXXX"
+        "technician_number": "+9665XXXXXXXX",
+        "severity": "Critical"
       }
     }
   ]
@@ -281,7 +291,58 @@ Ingests a single ticket or an entire batch of network/power/HVAC alerts, creates
 
 ---
 
-## 5. Get Alerts API
+## 5. Field Mapping: Previous vs Additional Fields & Data Types
+
+The table below contrasts the **Previous Fields** (original intake architecture) against the **Additional Fields** (expanded NexTask architecture), complete with sample values, data types mapped from the PostgreSQL schema (`tb_tickets`, `tb_nextask_events`, `tb_assignments`), and their functional purpose.
+
+### 5.1 Additional Fields (NexTask Extension)
+
+| No. | Additional Field | Data Type (PostgreSQL Schema) | Sample Value | Purpose |
+| :-: | :--- | :--- | :--- | :--- |
+| **1** | `batch_id` | `VARCHAR(50)` (`tb_nextask_events.batch_id`) | `"BATCH001"` | Identifies a batch of alerts processed together |
+| **2** | `event_timestamp` (batch level) | `TIMESTAMP WITH TIME ZONE` (`tb_nextask_events.event_timestamp`) | `"2026-10-30T10:30:00+03:00"` | Records the batch event creation timestamp |
+| **3** | `branch.branch_id` | `VARCHAR(50)` (`tb_tickets.branch_id`) | `"BR001"` | Unique identifier of the branch / facility |
+| **4** | `alert_id` | `VARCHAR(50)` (`tb_tickets.alert_id`) | `"ALT1001"` | Separate alert reference distinct from ticket ID |
+| **5** | `assignment.assignment_type` | `VARCHAR(30)` (`tb_assignments.assignment_type`) | `"INITIAL"` / `"REASSIGNMENT"` | Identifies assignment lifecycle type |
+| **6** | `assignment.assigned_at` | `TIMESTAMP WITH TIME ZONE` (`tb_assignments.assigned_at`) | `"2026-10-30T10:20:00+03:00"` | Records the exact assignment timestamp |
+| **7** | `assignment.previous_assignment_id` | `VARCHAR(50)` (`tb_assignments.previous_assignment_id`) | `null` / `"ASN001"` | Identifies the previous assignment during reassignment |
+
+---
+
+### 5.2 Previous vs Additional Architecture Comparison
+
+| Field Category | Previous Field | Additional / Nested Field | Data Type | Sample Value | Purpose & Mapping |
+| :--- | :--- | :--- | :--- | :--- | :--- |
+| **Batch Context** | *(none)* | `batch_id` | `VARCHAR(50)` | `"BATCH001"` | Identifies alert batch |
+| **Batch Context** | *(none)* | `event_timestamp` | `TIMESTAMPTZ` | `"2026-10-30T10:30:00+03:00"` | Root event generation timestamp |
+| **Event Metadata** | `event_id` | `event_id` | `VARCHAR(50)` | `"EVT001"` | Unique event identifier |
+| **Event Metadata** | `event_type` | `event_type` | `VARCHAR(60)` | `"ASSIGNMENT_REASSIGNED"` | Lifecycle event type |
+| **Event Metadata** | `version` | `event_version` | `BIGINT` | `2` | Event sequence version |
+| **Ticket Reference** | `ticket_id` | `ticket.ticket_id` | `VARCHAR(50)` | `"INC1001"` | Primary incident ticket reference |
+| **Ticket Reference** | `alarm_id` | `ticket.alarm_id` | `VARCHAR(50)` | `"ALM5001"` | Monitoring alarm reference |
+| **Ticket Reference** | *(none)* | `alert_id` | `VARCHAR(50)` | `"ALT1001"` | Dedicated alert reference ID |
+| **Ticket Details** | `description` | `ticket.issue_description` | `TEXT` | `"Network connectivity failure"` | Incident problem summary |
+| **Ticket Details** | `severity` | `ticket.severity` | `VARCHAR(30)` | `"Critical"` | Priority (`Critical`, `Major`, `Minor`) |
+| **Ticket Details** | `ticket_status` | `ticket.ticket_status` | `VARCHAR(50)` | `"Assigned"` | Workflow ticket state |
+| **Ticket Details** | `alarm_status` | `ticket.alarm_status` | `VARCHAR(50)` | `"Active"` | Equipment alarm state |
+| **Site / Branch** | `site_name` | `branch.branch_name` | `VARCHAR(150)` | `"Riyadh Main Office"` | Physical branch name |
+| **Site / Branch** | `site_number` | `branch.site_number` | `VARCHAR(50)` | `"SITE001"` | Site / branch code |
+| **Site / Branch** | *(none)* | `branch.branch_id` | `VARCHAR(50)` | `"BR001"` | Branch unique identifier |
+| **Assignment** | `assignment_id` | `assignment.assignment_id` | `VARCHAR(50)` | `"ASN002"` | Current dispatch assignment ID |
+| **Assignment** | *(none)* | `assignment.assignment_type` | `VARCHAR(30)` | `"REASSIGNMENT"` | Assignment type |
+| **Assignment** | *(none)* | `assignment.previous_assignment_id` | `VARCHAR(50)` | `"ASN001"` (or `null`) | Previous assignment ID for reassignment |
+| **Assignment** | `date_time` | `assignment.assigned_at` | `TIMESTAMPTZ` | `"2026-10-30T10:30:00+03:00"` | Assignment timestamp |
+| **Technician** | `technician_name` | `technician.name` | `VARCHAR(150)` | `"Ali"` | Field engineer name |
+| **Technician** | `technician_mobile` | `technician.mobile_number` | `VARCHAR(30)` | `"+9665XXXXXXXX"` | Contact phone number |
+| **Technician** | `technician_id` | `technician.technician_id` | `VARCHAR(50)` | `"ENG002"` | Technician employee/staff ID |
+| **Technician** | `language` | `technician.preferred_language` | `VARCHAR(20)` | `"English"` / `"Arabic"` | Preferred call audio language |
+| **Escalations** | `team_leader_*` | `team_leader.*` | `JSONB` / `VARCHAR` | `{"name":"Mohammed", "mobile_number":"..."}` | 1st escalation contact |
+| **Escalations** | `manager_*` | `manager.*` | `JSONB` / `VARCHAR` | `{"name":"Khalid", "mobile_number":"..."}` | 2nd escalation contact |
+| **DTMF Config** | `ack_digit` | `acknowledgement.dtmf_digit` | `VARCHAR(10)` | `"1"` | DTMF key to acknowledge call |
+
+---
+
+## 6. Get Alerts API
 
 Retrieves batch alert status, ticket delivery states, and DTMF interaction history without triggering calls.
 
@@ -315,6 +376,8 @@ Retrieves batch alert status, ticket delivery states, and DTMF interaction histo
       "index": 0,
       "ticket_id": "INC1001",
       "alert_id": "ALT1001",
+      "event_id": "EVT001",
+      "event_timestamp": "2026-10-30T10:30:00+03:00",
       "ack_digit": "1",
       "reject_digit": "9",
       "dtmf_pressed": "1",
@@ -336,17 +399,17 @@ Retrieves batch alert status, ticket delivery states, and DTMF interaction histo
 
 ---
 
-## 6. Twilio Webhooks
+## 7. Twilio Webhooks
 
 The platform exposes two public endpoints for Twilio Voice communications.
 
-### 6.1 Voice Callback
+### 7.1 Voice Callback
 * **Endpoint:** `/twilio/voice`
 * **Method:** `POST`
 * **URL:** `https://nextaskgw.automationedge.com/twilio/voice?cid={call_id}`
 * **Purpose:** Returns the dynamic TwiML (XML) audio script when a call is answered by the technician.
 
-### 6.2 Status Callback
+### 7.2 Status Callback
 * **Endpoint:** `/twilio/call-status`
 * **Method:** `POST`
 * **URL:** `https://nextaskgw.automationedge.com/twilio/call-status?cid={call_id}`
@@ -354,7 +417,7 @@ The platform exposes two public endpoints for Twilio Voice communications.
 
 ---
 
-## 7. Error Handling & HTTP Status Codes
+## 8. Error Handling & HTTP Status Codes
 
 | HTTP Code | Name | Scenario |
 | :---: | :--- | :--- |
