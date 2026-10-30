@@ -362,8 +362,76 @@ input,select{{padding:6px;font:inherit}} button{{background:#f58220;color:#fff;b
 .card{{background:#fff;border-radius:8px;padding:12px 16px;margin-top:12px}} .hd{{display:flex;gap:8px;flex-wrap:wrap;align-items:center}}
 .st{{margin-left:auto;padding:2px 8px;border-radius:10px;font-size:12px}} .ok{{background:#d8f3e0;color:#17643a}}
 .bad{{background:#fde0e0;color:#9b1c1c}} .run{{background:#e5ecfb;color:#1d4ed8}} .sub{{color:#556;font-size:12px;margin-top:4px}}
-ul{{margin:8px 0;padding-left:18px}} small{{color:#889}} .dl-btn{{background:#0b3a75;border:1px solid #fff;color:#fff;padding:4px 10px;border-radius:4px;text-decoration:none;font-size:12px;float:right}}</style></head><body><header><a href="/api/logs/download" class="dl-btn" download>📥 Download Log File</a><b>FLM Helpdesk · Voice call platform</b><br>
-<small style=color:#cdd>{mode} · technician attempts {CFG['tech_max_attempts']} · reject key {CFG['default_reject_digit']}</small></header><main>
+ul{{margin:8px 0;padding-left:18px}} small{{color:#889}} .dl-btn{{background:#0b3a75;border:1px solid #fff;color:#fff;padding:4px 10px;border-radius:4px;text-decoration:none;font-size:12px;float:right}}</style></head><body><header style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:12px;">
+<div>
+  <b style="font-size:16px;">AutomationEdge FLM · NextAsk Voice Platform</b><br>
+  <small style="color:#cdd;">{mode} · attempts {CFG['tech_max_attempts']} · reject key {CFG['default_reject_digit']}</small>
+</div>
+<div style="display:flex;align-items:center;gap:10px;">
+  <a href="/docs" target="_blank" style="background:rgba(255,255,255,0.15);border:1px solid rgba(255,255,255,0.3);color:#fff;padding:6px 12px;border-radius:6px;text-decoration:none;font-size:13px;font-weight:600;">📖 API Docs</a>
+  <a href="/api/logs/download" class="dl-btn" download style="float:none;">📥 Download Logs</a>
+</div>
+</header>
+
+<!-- Tab Navigation Bar -->
+<div style="background:#fff;border-bottom:1px solid #d0d7de;padding:0 24px;">
+  <div style="max-width:1040px;margin:0 auto;display:flex;gap:8px;">
+    <button id="tab-home-btn" onclick="showTab('home')" style="background:none;border:none;border-bottom:3px solid #0969da;color:#0969da;padding:12px 18px;font-weight:700;font-size:14px;cursor:pointer;">
+      🏠 Home / Overview
+    </button>
+    <button id="tab-calls-btn" onclick="showTab('calls')" style="background:none;border:none;border-bottom:3px solid transparent;color:#57606a;padding:12px 18px;font-weight:600;font-size:14px;cursor:pointer;">
+      📞 Call Dispatcher & Ticket Logs
+    </button>
+  </div>
+</div>
+
+<main>
+<!-- TAB 1: HOME OVERVIEW -->
+<div id="view-tab-home" style="display:block;">
+  <div style="background:#fff;border-radius:10px;padding:28px;margin-bottom:20px;border:1px solid #e1e4e8;box-shadow:0 2px 8px rgba(0,0,0,0.04);">
+    <div style="display:inline-block;padding:4px 10px;background:#ddf4ff;color:#0969da;font-size:12px;font-weight:700;border-radius:20px;margin-bottom:12px;">🚀 NextAsk Gateway Portal</div>
+    <h2 style="margin:0 0 10px 0;font-size:22px;color:#1f2328;">Welcome to NextAsk FLM Voice Platform</h2>
+    <p style="color:#57606a;line-height:1.6;margin:0 0 20px 0;font-size:14px;">
+      This gateway handles automated emergency and routine dispatch calls for field technicians, team leaders, and operations managers. 
+      Technicians receive interactive IVR voice phone calls in their preferred language with DTMF acknowledgment (Press 1 to accept, Press 9 to decline).
+    </p>
+    <div style="display:flex;gap:12px;flex-wrap:wrap;">
+      <button onclick="showTab('calls')" style="background:#0969da;color:#fff;border:none;padding:10px 20px;border-radius:6px;font-weight:600;cursor:pointer;font-size:13px;">
+        📞 Open Call Dispatcher &amp; Logs &rarr;
+      </button>
+      <a href="/docs" target="_blank" style="background:#f6f8fa;color:#24292f;border:1px solid #d0d7de;padding:10px 18px;border-radius:6px;font-weight:600;text-decoration:none;font-size:13px;display:inline-flex;align-items:center;gap:6px;">
+        📖 View API Documentation &rarr;
+      </a>
+    </div>
+  </div>
+
+  <!-- Gateway Quick Endpoints Grid -->
+  <div style="display:grid;grid-template-columns:repeat(auto-fit, minmax(240px, 1fr));gap:14px;margin-bottom:20px;">
+    <div style="background:#fff;border:1px solid #e1e4e8;border-radius:8px;padding:16px;">
+      <div style="font-size:11px;font-weight:700;color:#0969da;text-transform:uppercase;margin-bottom:4px;">Authorization API</div>
+      <div style="font-family:monospace;font-size:12px;color:#24292f;font-weight:600;margin-bottom:6px;">POST /api/authorize</div>
+      <div style="font-size:12px;color:#57606a;">Authenticates with Basic Auth or JSON to generate/verify platform API Key.</div>
+    </div>
+    <div style="background:#fff;border:1px solid #e1e4e8;border-radius:8px;padding:16px;">
+      <div style="font-size:11px;font-weight:700;color:#1a7f37;text-transform:uppercase;margin-bottom:4px;">Alert Intake API</div>
+      <div style="font-family:monospace;font-size:12px;color:#24292f;font-weight:600;margin-bottom:6px;">POST /api/alerts</div>
+      <div style="font-size:12px;color:#57606a;">Ingests single or batch tickets and triggers immediate voice calls via Twilio.</div>
+    </div>
+    <div style="background:#fff;border:1px solid #e1e4e8;border-radius:8px;padding:16px;">
+      <div style="font-size:11px;font-weight:700;color:#8250df;text-transform:uppercase;margin-bottom:4px;">Get Alerts API</div>
+      <div style="font-family:monospace;font-size:12px;color:#24292f;font-weight:600;margin-bottom:6px;">GET /api/getalerts</div>
+      <div style="font-size:12px;color:#57606a;">Retrieves batch statuses, DTMF acknowledgment responses, and ticket logs.</div>
+    </div>
+    <div style="background:#fff;border:1px solid #e1e4e8;border-radius:8px;padding:16px;">
+      <div style="font-size:11px;font-weight:700;color:#bf8700;text-transform:uppercase;margin-bottom:4px;">Twilio Webhooks</div>
+      <div style="font-family:monospace;font-size:12px;color:#24292f;font-weight:600;margin-bottom:6px;">/twilio/voice &amp; /call-status</div>
+      <div style="font-size:12px;color:#57606a;">Dynamic TwiML scripts and live call status callbacks with escalation logic.</div>
+    </div>
+  </div>
+</div>
+
+<!-- TAB 2: CALL PLATFORM / TICKETS -->
+<div id="view-tab-calls" style="display:none;">
 <form method=post action=/trigger>
 <label>Alert ID<input name=alert_id value="ALM1001" size=9></label>
 <label>Ticket ID<input name=ticket_id placeholder="INC0012345" size=11 required></label>
@@ -373,7 +441,45 @@ ul{{margin:8px 0;padding-left:18px}} small{{color:#889}} .dl-btn{{background:#0b
 <label>Technician<input name=phone_number placeholder="+91..." required></label>
 <label>Team leader<input name=team_leader_number placeholder="optional"></label>
 <label>Manager<input name=manager_number placeholder="optional"></label>
-<button>Call technician</button></form>{cards or '<p>No tickets yet.</p>'}</main></body></html>"""
+<button>Call technician</button></form>{cards or '<p>No tickets yet.</p>'}
+</div> <!-- end view-tab-calls -->
+</main>
+
+<script>
+function showTab(tab) {{
+  var homeView = document.getElementById('view-tab-home');
+  var callsView = document.getElementById('view-tab-calls');
+  var homeBtn = document.getElementById('tab-home-btn');
+  var callsBtn = document.getElementById('tab-calls-btn');
+  
+  if (tab === 'calls') {{
+    homeView.style.display = 'none';
+    callsView.style.display = 'block';
+    homeBtn.style.color = '#57606a';
+    homeBtn.style.borderBottomColor = 'transparent';
+    homeBtn.style.fontWeight = '600';
+    callsBtn.style.color = '#0969da';
+    callsBtn.style.borderBottomColor = '#0969da';
+    callsBtn.style.fontWeight = '700';
+    window.location.hash = 'calls';
+  }} else {{
+    homeView.style.display = 'block';
+    callsView.style.display = 'none';
+    homeBtn.style.color = '#0969da';
+    homeBtn.style.borderBottomColor = '#0969da';
+    homeBtn.style.fontWeight = '700';
+    callsBtn.style.color = '#57606a';
+    callsBtn.style.borderBottomColor = 'transparent';
+    callsBtn.style.fontWeight = '600';
+    window.location.hash = 'home';
+  }}
+}}
+
+if (window.location.hash === '#calls') {{
+  showTab('calls');
+}}
+</script>
+</body></html>"""
 
 
 # --------------------------------------------------------------------------- synchronous wait
