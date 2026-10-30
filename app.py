@@ -557,9 +557,7 @@ ul{{margin:8px 0;padding-left:18px}} small{{color:#889}} .dl-btn{{background:#0b
       <button onclick="showTab('calls')" style="background:#0969da;color:#fff;border:none;padding:10px 20px;border-radius:6px;font-weight:600;cursor:pointer;font-size:13px;">
         📞 Open Call Dispatcher &amp; Logs &rarr;
       </button>
-      <a href="/docs" target="_blank" style="background:#f6f8fa;color:#24292f;border:1px solid #d0d7de;padding:10px 18px;border-radius:6px;font-weight:600;text-decoration:none;font-size:13px;display:inline-flex;align-items:center;gap:6px;">
-        📖 View API Documentation &rarr;
-      </a>
+
     </div>
   </div>
 
