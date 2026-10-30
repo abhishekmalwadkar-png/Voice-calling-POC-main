@@ -491,151 +491,736 @@ def login_page_html(error_msg=None):
 </html>"""
 
 
+
+def safe_esc(val):
+    if val is None:
+        return ""
+    return escape(str(val))
+
 def dashboard_html():
+    tickets = queries.list_tickets({"limit": 50})
+    total_tickets = len(tickets)
+    ack_count = 0
+    calling_count = 0
+    escalated_count = 0
+
     cards = ""
-    for v in queries.list_tickets({"limit": 25}):
-        cw = v["call_workflow"]
-        calls = "".join(
-            f"<li>{escape(c['role'])} #{c['attempt_no']} <small>{escape(c['workflow'])}</small> &rarr; "
-            f"{escape(c['to_number'] or '')} | {escape(c['status'] or '')} | lang {escape(c['language'] or '-')}"
-            f" | key {escape(c['dtmf'] or '-')} | <b>{escape(c['response'])}</b>"
-            f"{' <i>(superseded)</i>' if c['superseded'] else ''}</li>" for c in v["calls"])
-        state = cw["state"] or "-"
-        cls = "ok" if state in ("ACKNOWLEDGED", "TL_REACHED", "MANAGER_REACHED") else \
-            ("bad" if "UNRESOLVED" in state or "NO_CONTACTS" in state else "run")
-        cards += (f"<div class=card><div class=hd><b>{escape(v['ticket_id'])}</b> {escape(v['site_number'] or '')} "
-                  f"{escape(v['site_name'] or '')} · assignment {escape(v['assignment_id'] or '-')} · "
-                  f"ticket {escape(v['status'] or '-')}<span class='st {cls}'>{escape(state)}</span></div>"
-                  f"<div class=sub>{escape(cw['response_summary'])} · follow-up: {escape(v['followup']['state'] or '-')}"
-                  f"</div><ul>{calls}</ul></div>")
-    mode = "DRY RUN" if CFG["dry_run"] else f"LIVE · {escape(CFG['base_url'] or 'no public URL')}"
-    options = "".join(f"<option value={c}>{texts.LANGS[c]['name']}</option>" for c in texts.LANGS)
-    return f"""<!doctype html><html><head><meta charset=utf-8><meta http-equiv=refresh content=5>
-<title>FLM Voice Platform</title><style>
-body{{font:14px system-ui;margin:0;background:#f4f6fa;color:#1d2433}} header{{background:#0b3a75;color:#fff;padding:14px 24px}}
-main{{max-width:1040px;margin:20px auto;padding:0 16px}} form{{background:#fff;padding:14px;border-radius:8px;display:flex;
-flex-wrap:wrap;gap:10px;align-items:end}} label{{display:flex;flex-direction:column;font-size:12px;color:#556}}
-input,select{{padding:6px;font:inherit}} button{{background:#f58220;color:#fff;border:0;padding:8px 16px;border-radius:6px;font-weight:600}}
-.card{{background:#fff;border-radius:8px;padding:12px 16px;margin-top:12px}} .hd{{display:flex;gap:8px;flex-wrap:wrap;align-items:center}}
-.st{{margin-left:auto;padding:2px 8px;border-radius:10px;font-size:12px}} .ok{{background:#d8f3e0;color:#17643a}}
-.bad{{background:#fde0e0;color:#9b1c1c}} .run{{background:#e5ecfb;color:#1d4ed8}} .sub{{color:#556;font-size:12px;margin-top:4px}}
-ul{{margin:8px 0;padding-left:18px}} small{{color:#889}} .dl-btn{{background:#0b3a75;border:1px solid #fff;color:#fff;padding:4px 10px;border-radius:4px;text-decoration:none;font-size:12px;float:right}}</style></head><body><header style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:12px;">
-<div>
-  <b style="font-size:16px;">AutomationEdge FLM · NextAsk Voice Platform</b><br>
-  <small style="color:#cdd;">{mode} · attempts {CFG['tech_max_attempts']} · reject key {CFG['default_reject_digit']}</small>
-</div>
-<div style="display:flex;align-items:center;gap:10px;">
-  <a href="/docs" target="_blank" style="background:rgba(255,255,255,0.15);border:1px solid rgba(255,255,255,0.3);color:#fff;padding:6px 12px;border-radius:6px;text-decoration:none;font-size:13px;font-weight:600;">📖 API Docs</a>
-  <a href="/api/logs/download" class="dl-btn" download style="float:none;">📥 Download Logs</a>
-  <a href="/logout" style="background:rgba(220,38,38,0.85);border:1px solid rgba(255,255,255,0.4);color:#fff;padding:6px 12px;border-radius:6px;text-decoration:none;font-size:13px;font-weight:600;">🚪 Logout</a>
-</div>
-</header>
+    for v in tickets:
+        cw = v.get("call_workflow") or {}
+        state = (cw.get("state") or "-").upper()
+        is_ack = v.get("acknowledged") or state in ("ACKNOWLEDGED", "TL_REACHED", "MANAGER_REACHED")
+        
+        has_active_call = any(c.get("status") in ("queued", "ringing", "in-progress") for c in v.get("calls", []))
+        is_calling = has_active_call or "CALL" in state
 
-<!-- Tab Navigation Bar -->
-<div style="background:#fff;border-bottom:1px solid #d0d7de;padding:0 24px;">
-  <div style="max-width:1040px;margin:0 auto;display:flex;gap:8px;">
-    <button id="tab-home-btn" onclick="showTab('home')" style="background:none;border:none;border-bottom:3px solid #0969da;color:#0969da;padding:12px 18px;font-weight:700;font-size:14px;cursor:pointer;">
-      🏠 Home / Overview
-    </button>
-    <button id="tab-calls-btn" onclick="showTab('calls')" style="background:none;border:none;border-bottom:3px solid transparent;color:#57606a;padding:12px 18px;font-weight:600;font-size:14px;cursor:pointer;">
-      📞 Call Dispatcher & Ticket Logs
-    </button>
-  </div>
-</div>
+        if is_ack:
+            ack_count += 1
+            filter_cat = "ack"
+            cls = "status-ok"
+            status_icon = "✓"
+        elif is_calling:
+            calling_count += 1
+            filter_cat = "calling"
+            cls = "status-calling"
+            status_icon = "●"
+        else:
+            escalated_count += 1
+            filter_cat = "escalated"
+            cls = "status-bad" if "UNRESOLVED" in state or "NO_CONTACTS" in state else "status-warn"
+            status_icon = "!"
 
-<main>
-<!-- TAB 1: HOME OVERVIEW -->
-<div id="view-tab-home" style="display:block;">
-  <div style="background:#fff;border-radius:10px;padding:28px;margin-bottom:20px;border:1px solid #e1e4e8;box-shadow:0 2px 8px rgba(0,0,0,0.04);">
-    <div style="display:inline-block;padding:4px 10px;background:#ddf4ff;color:#0969da;font-size:12px;font-weight:700;border-radius:20px;margin-bottom:12px;">🚀 NextAsk Gateway Portal</div>
-    <h2 style="margin:0 0 10px 0;font-size:22px;color:#1f2328;">Welcome to NextAsk FLM Voice Platform</h2>
-    <p style="color:#57606a;line-height:1.6;margin:0 0 20px 0;font-size:14px;">
-      This gateway handles automated emergency and routine dispatch calls for field technicians, team leaders, and operations managers. 
-      Technicians receive interactive IVR voice phone calls in their preferred language with DTMF acknowledgment (Press 1 to accept, Press 9 to decline).
-    </p>
-    <div style="display:flex;gap:12px;flex-wrap:wrap;">
-      <button onclick="showTab('calls')" style="background:#0969da;color:#fff;border:none;padding:10px 20px;border-radius:6px;font-weight:600;cursor:pointer;font-size:13px;">
-        📞 Open Call Dispatcher &amp; Logs &rarr;
-      </button>
+        severity = str(v.get("severity") or "Normal").capitalize()
+        sev_cls = "sev-critical" if severity.lower() == "critical" else ("sev-major" if severity.lower() == "major" else "sev-normal")
 
+        calls_html = ""
+        for c in v.get("calls", []):
+            role_title = f"{safe_esc(c.get('role', 'Technician')).capitalize()} #{c.get('attempt_no', 1)}"
+            c_status = safe_esc(c.get("status") or "unknown")
+            c_lang = safe_esc(c.get("language") or "-")
+            c_dtmf = safe_esc(str(c.get("dtmf") or "-"))
+            c_resp = safe_esc(c.get("response") or "-")
+            c_phone = safe_esc(c.get("to_number") or "")
+            superseded = " <span class='badge-superseded'>superseded</span>" if c.get("superseded") else ""
+
+            calls_html += f"""
+            <div class="call-row">
+              <div class="call-role"><span class="role-badge">{role_title}</span> <span class="phone-number">📞 {c_phone}</span></div>
+              <div class="call-meta">
+                <span class="meta-tag">Status: <b>{c_status}</b></span>
+                <span class="meta-tag">Lang: <b>{c_lang}</b></span>
+                <span class="meta-tag">Key: <b>{c_dtmf}</b></span>
+                <span class="meta-tag response-tag">Resp: <b>{c_resp}</b></span>
+                {superseded}
+              </div>
+            </div>"""
+
+        time_str = safe_esc(v.get("last_event_time") or v.get("created_at") or "-")
+        search_blob = f"{safe_esc(v.get('ticket_id')).lower()} {safe_esc(v.get('site_name')).lower()} {safe_esc(v.get('site_number')).lower()} {safe_esc(v.get('alert_id')).lower()}"
+
+        cards += f"""
+        <div class="ticket-card" data-category="{filter_cat}" data-search="{search_blob}">
+          <div class="card-header">
+            <div class="ticket-primary">
+              <span class="ticket-id">{safe_esc(v.get('ticket_id') or 'INC000')}</span>
+              <span class="site-badge">🏢 {safe_esc(v.get('site_number'))} {safe_esc(v.get('site_name') or 'Main Site')}</span>
+              <span class="sev-badge {sev_cls}">{severity}</span>
+              <span class="sub-badge">Alert: {safe_esc(v.get('alert_id') or '-')}</span>
+              <span class="sub-badge">Assign: {safe_esc(v.get('assignment_id') or '-')}</span>
+            </div>
+            <div class="status-pill {cls}">
+              <span class="status-dot">{status_icon}</span> {safe_esc(state)}
+            </div>
+          </div>
+          <div class="card-body">
+            <div class="card-summary">
+              <div><b>Summary:</b> {safe_esc(cw.get('response_summary') or 'No call response yet.')}</div>
+              <div class="followup-info">Follow-up: <b>{safe_esc(v.get('followup', {}).get('state') or 'None')}</b></div>
+            </div>
+            <div class="calls-timeline">
+              {calls_html or '<div class="no-calls">No outbound call records logged yet for this ticket.</div>'}
+            </div>
+          </div>
+          <div class="card-footer">
+            <span>🕒 Event Timestamp: <b>{time_str}</b></span>
+            <span>Ticket Status: <b>{safe_esc(v.get('status') or 'Active')}</b></span>
+          </div>
+        </div>"""
+
+    ack_rate = f"{int((ack_count / total_tickets) * 100)}%" if total_tickets > 0 else "0%"
+    mode = "DRY RUN (Simulator)" if CFG["dry_run"] else f"LIVE GATEWAY · {safe_esc(CFG.get('base_url') or 'Connected')}"
+    lang_options = "".join(f"<option value='{c}'>{texts.LANGS[c]['name']}</option>" for c in texts.LANGS)
+
+    return f"""<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta http-equiv="refresh" content="10">
+  <title>NextAsk Voice Platform · Live Operations Console</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@500;600&display=swap" rel="stylesheet">
+  <style>
+    :root {{
+      --primary: #0969da;
+      --primary-hover: #0856b3;
+      --bg: #f8fafc;
+      --card-bg: #ffffff;
+      --border: #e2e8f0;
+      --text: #0f172a;
+      --text-muted: #64748b;
+      --success: #10b981;
+      --warning: #f59e0b;
+      --danger: #ef4444;
+      --purple: #8b5cf6;
+    }}
+    * {{ box-sizing: border-box; margin: 0; padding: 0; }}
+    body {{
+      font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+    }}
+    header {{
+      background: #0f172a;
+      color: #fff;
+      padding: 16px 32px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 16px;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+    }}
+    .brand {{
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }}
+    .brand-icon {{
+      width: 40px;
+      height: 40px;
+      border-radius: 10px;
+      background: linear-gradient(135deg, #38bdf8, #2563eb);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 20px;
+      box-shadow: 0 0 16px rgba(56, 189, 248, 0.4);
+    }}
+    .brand-title {{
+      font-size: 17px;
+      font-weight: 700;
+      letter-spacing: -0.01em;
+      color: #f8fafc;
+    }}
+    .brand-subtitle {{
+      font-size: 12px;
+      color: #94a3b8;
+    }}
+    .header-actions {{
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }}
+    .live-pulse {{
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      background: rgba(16, 185, 129, 0.15);
+      border: 1px solid rgba(16, 185, 129, 0.3);
+      color: #34d399;
+      padding: 6px 12px;
+      border-radius: 20px;
+      font-size: 12px;
+      font-weight: 600;
+    }}
+    .pulse-dot {{
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: #10b981;
+      animation: pulse 1.8s infinite;
+    }}
+    @keyframes pulse {{
+      0% {{ transform: scale(0.95); box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.7); }}
+      70% {{ transform: scale(1); box-shadow: 0 0 0 6px rgba(16, 185, 129, 0); }}
+      100% {{ transform: scale(0.95); box-shadow: 0 0 0 0 rgba(16, 185, 129, 0); }}
+    }}
+    .btn-header {{
+      background: rgba(255, 255, 255, 0.1);
+      border: 1px solid rgba(255, 255, 255, 0.2);
+      color: #fff;
+      padding: 7px 14px;
+      border-radius: 6px;
+      text-decoration: none;
+      font-size: 13px;
+      font-weight: 600;
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      transition: background 0.2s ease;
+    }}
+    .btn-header:hover {{
+      background: rgba(255, 255, 255, 0.2);
+    }}
+    .btn-logout {{
+      background: rgba(239, 68, 68, 0.2);
+      border-color: rgba(239, 68, 68, 0.4);
+      color: #fca5a5;
+    }}
+    .btn-logout:hover {{
+      background: rgba(239, 68, 68, 0.35);
+      color: #fff;
+    }}
+    main {{
+      max-width: 1200px;
+      margin: 24px auto;
+      padding: 0 20px;
+      flex: 1;
+      width: 100%;
+    }}
+    /* Metric Cards Grid */
+    .metrics-grid {{
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+      gap: 16px;
+      margin-bottom: 24px;
+    }}
+    .metric-card {{
+      background: var(--card-bg);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 20px;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+      position: relative;
+      overflow: hidden;
+    }}
+    .metric-card::before {{
+      content: '';
+      position: absolute;
+      top: 0;
+      left: 0;
+      right: 0;
+      height: 4px;
+    }}
+    .metric-blue::before {{ background: #2563eb; }}
+    .metric-green::before {{ background: #10b981; }}
+    .metric-amber::before {{ background: #f59e0b; }}
+    .metric-purple::before {{ background: #8b5cf6; }}
+    .metric-label {{
+      font-size: 12px;
+      font-weight: 600;
+      color: var(--text-muted);
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      margin-bottom: 8px;
+    }}
+    .metric-value-row {{
+      display: flex;
+      align-items: baseline;
+      justify-content: space-between;
+    }}
+    .metric-number {{
+      font-size: 32px;
+      font-weight: 800;
+      color: var(--text);
+      letter-spacing: -0.02em;
+    }}
+    .metric-badge {{
+      font-size: 12px;
+      font-weight: 700;
+      padding: 4px 10px;
+      border-radius: 20px;
+    }}
+    .badge-blue {{ background: #eff6ff; color: #1d4ed8; }}
+    .badge-green {{ background: #ecfdf5; color: #047857; }}
+    .badge-amber {{ background: #fffbeb; color: #b45309; }}
+    .badge-purple {{ background: #f5f3ff; color: #6d28d9; }}
+    /* Dispatch Bar */
+    .dispatch-box {{
+      background: var(--card-bg);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      margin-bottom: 24px;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+      overflow: hidden;
+    }}
+    .dispatch-header {{
+      padding: 16px 20px;
+      background: #f1f5f9;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      cursor: pointer;
+      user-select: none;
+    }}
+    .dispatch-title {{
+      font-size: 14px;
+      font-weight: 700;
+      color: #1e293b;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }}
+    .dispatch-body {{
+      padding: 20px;
+      display: none;
+    }}
+    .dispatch-form {{
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+      gap: 14px;
+      align-items: end;
+    }}
+    .form-group {{
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }}
+    .form-group label {{
+      font-size: 12px;
+      font-weight: 600;
+      color: var(--text-muted);
+    }}
+    .form-group input, .form-group select {{
+      padding: 9px 12px;
+      border: 1px solid #cbd5e1;
+      border-radius: 6px;
+      font-size: 13px;
+      font-family: inherit;
+    }}
+    .btn-dispatch {{
+      background: #0969da;
+      color: #fff;
+      border: none;
+      padding: 10px 18px;
+      border-radius: 6px;
+      font-weight: 600;
+      font-size: 13px;
+      cursor: pointer;
+      height: 40px;
+      transition: background 0.15s ease;
+    }}
+    .btn-dispatch:hover {{
+      background: #0856b3;
+    }}
+    /* Controls & Filter Bar */
+    .controls-bar {{
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 16px;
+      margin-bottom: 20px;
+    }}
+    .filter-pills {{
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+    }}
+    .filter-btn {{
+      background: #fff;
+      border: 1px solid var(--border);
+      color: var(--text-muted);
+      padding: 8px 14px;
+      border-radius: 8px;
+      font-size: 13px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.15s ease;
+    }}
+    .filter-btn.active, .filter-btn:hover {{
+      background: #0969da;
+      color: #fff;
+      border-color: #0969da;
+    }}
+    .search-box {{
+      position: relative;
+      min-width: 260px;
+    }}
+    .search-input {{
+      width: 100%;
+      padding: 9px 14px 9px 36px;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      font-size: 13px;
+      font-family: inherit;
+      background: #fff;
+    }}
+    .search-icon {{
+      position: absolute;
+      left: 12px;
+      top: 50%;
+      transform: translateY(-50%);
+      color: #94a3b8;
+      font-size: 14px;
+    }}
+    /* Ticket Cards */
+    .ticket-card {{
+      background: var(--card-bg);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      margin-bottom: 16px;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.04);
+      transition: box-shadow 0.2s ease, border-color 0.2s ease;
+    }}
+    .ticket-card:hover {{
+      box-shadow: 0 4px 12px rgba(0,0,0,0.08);
+      border-color: #cbd5e1;
+    }}
+    .card-header {{
+      padding: 16px 20px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 12px;
+      border-bottom: 1px solid #f1f5f9;
+    }}
+    .ticket-primary {{
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      flex-wrap: wrap;
+    }}
+    .ticket-id {{
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 15px;
+      font-weight: 700;
+      color: #0f172a;
+    }}
+    .site-badge {{
+      background: #f1f5f9;
+      color: #334155;
+      padding: 4px 10px;
+      border-radius: 6px;
+      font-size: 12px;
+      font-weight: 600;
+    }}
+    .sev-badge {{
+      font-size: 11px;
+      font-weight: 700;
+      padding: 3px 8px;
+      border-radius: 4px;
+      text-transform: uppercase;
+    }}
+    .sev-critical {{ background: #fee2e2; color: #991b1b; }}
+    .sev-major {{ background: #fef3c7; color: #92400e; }}
+    .sev-normal {{ background: #e0f2fe; color: #075985; }}
+    .sub-badge {{
+      font-size: 11px;
+      color: #64748b;
+    }}
+    .status-pill {{
+      padding: 5px 12px;
+      border-radius: 20px;
+      font-size: 12px;
+      font-weight: 700;
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+    }}
+    .status-ok {{ background: #dcfce7; color: #15803d; }}
+    .status-calling {{ background: #dbeafe; color: #1e40af; }}
+    .status-warn {{ background: #fef3c7; color: #b45309; }}
+    .status-bad {{ background: #fee2e2; color: #b91c1c; }}
+    .card-body {{
+      padding: 16px 20px;
+    }}
+    .card-summary {{
+      font-size: 13.5px;
+      color: #334155;
+      margin-bottom: 14px;
+      display: flex;
+      justify-content: space-between;
+      flex-wrap: wrap;
+      gap: 10px;
+    }}
+    .followup-info {{
+      font-size: 12px;
+      color: #64748b;
+    }}
+    .calls-timeline {{
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }}
+    .call-row {{
+      background: #f8fafc;
+      border: 1px solid #e2e8f0;
+      border-radius: 8px;
+      padding: 10px 14px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 10px;
+      font-size: 12.5px;
+    }}
+    .call-role {{
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }}
+    .role-badge {{
+      background: #0f172a;
+      color: #fff;
+      padding: 2px 8px;
+      border-radius: 4px;
+      font-weight: 600;
+      font-size: 11px;
+    }}
+    .phone-number {{
+      font-family: 'JetBrains Mono', monospace;
+      color: #334155;
+      font-weight: 500;
+    }}
+    .call-meta {{
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      flex-wrap: wrap;
+    }}
+    .meta-tag {{
+      color: #64748b;
+    }}
+    .meta-tag b {{
+      color: #0f172a;
+    }}
+    .response-tag b {{
+      color: #0969da;
+    }}
+    .badge-superseded {{
+      background: #f1f5f9;
+      color: #94a3b8;
+      font-style: italic;
+      padding: 2px 6px;
+      border-radius: 4px;
+      font-size: 11px;
+    }}
+    .no-calls {{
+      font-size: 13px;
+      color: #94a3b8;
+      font-style: italic;
+      padding: 8px 0;
+    }}
+    .card-footer {{
+      padding: 10px 20px;
+      background: #f8fafc;
+      border-top: 1px solid #f1f5f9;
+      border-bottom-left-radius: 12px;
+      border-bottom-right-radius: 12px;
+      display: flex;
+      justify-content: space-between;
+      font-size: 11.5px;
+      color: #64748b;
+    }}
+  </style>
+</head>
+<body>
+  <header>
+    <div class="brand">
+      <div class="brand-icon">⚡</div>
+      <div>
+        <div class="brand-title">NextAsk Voice Operations Platform</div>
+        <div class="brand-subtitle">{mode} · Attempts {CFG['tech_max_attempts']} · Reject Key {CFG['default_reject_digit']}</div>
+      </div>
     </div>
-  </div>
-
-  <!-- Gateway Quick Endpoints Grid -->
-  <div style="display:grid;grid-template-columns:repeat(auto-fit, minmax(240px, 1fr));gap:14px;margin-bottom:20px;">
-    <div style="background:#fff;border:1px solid #e1e4e8;border-radius:8px;padding:16px;">
-      <div style="font-size:11px;font-weight:700;color:#0969da;text-transform:uppercase;margin-bottom:4px;">Authorization API</div>
-      <div style="font-family:monospace;font-size:12px;color:#24292f;font-weight:600;margin-bottom:6px;">POST /api/authorize</div>
-      <div style="font-size:12px;color:#57606a;">Authenticates with Basic Auth or JSON to generate/verify platform API Key.</div>
+    <div class="header-actions">
+      <div class="live-pulse">
+        <span class="pulse-dot"></span> Live Console
+      </div>
+      <a href="/api/logs/download" class="btn-header" download>📥 Export Logs</a>
+      <a href="/logout" class="btn-header btn-logout">🚪 Logout</a>
     </div>
-    <div style="background:#fff;border:1px solid #e1e4e8;border-radius:8px;padding:16px;">
-      <div style="font-size:11px;font-weight:700;color:#1a7f37;text-transform:uppercase;margin-bottom:4px;">Alert Intake API</div>
-      <div style="font-family:monospace;font-size:12px;color:#24292f;font-weight:600;margin-bottom:6px;">POST /api/alerts</div>
-      <div style="font-size:12px;color:#57606a;">Ingests single or batch tickets and triggers immediate voice calls via Twilio.</div>
-    </div>
-    <div style="background:#fff;border:1px solid #e1e4e8;border-radius:8px;padding:16px;">
-      <div style="font-size:11px;font-weight:700;color:#8250df;text-transform:uppercase;margin-bottom:4px;">Get Alerts API</div>
-      <div style="font-family:monospace;font-size:12px;color:#24292f;font-weight:600;margin-bottom:6px;">GET /api/getalerts</div>
-      <div style="font-size:12px;color:#57606a;">Retrieves batch statuses, DTMF acknowledgment responses, and ticket logs.</div>
-    </div>
-    <div style="background:#fff;border:1px solid #e1e4e8;border-radius:8px;padding:16px;">
-      <div style="font-size:11px;font-weight:700;color:#bf8700;text-transform:uppercase;margin-bottom:4px;">Twilio Webhooks</div>
-      <div style="font-family:monospace;font-size:12px;color:#24292f;font-weight:600;margin-bottom:6px;">/twilio/voice &amp; /call-status</div>
-      <div style="font-size:12px;color:#57606a;">Dynamic TwiML scripts and live call status callbacks with escalation logic.</div>
-    </div>
-  </div>
-</div>
+  </header>
 
-<!-- TAB 2: CALL PLATFORM / TICKETS -->
-<div id="view-tab-calls" style="display:none;">
-<form method=post action=/trigger>
-<label>Alert ID<input name=alert_id value="ALM1001" size=9></label>
-<label>Ticket ID<input name=ticket_id placeholder="INC0012345" size=11 required></label>
-<label>Site<input name=site_details value="Site 2040, Olaya Branch, Riyadh" size=24></label>
-<label>Language<select name=language><option value=ask>Ask (menu)</option>{options}</select></label>
-<label>Ack key<input name=ack_digit value=1 size=2></label>
-<label>Technician<input name=phone_number placeholder="+91..." required></label>
-<label>Team leader<input name=team_leader_number placeholder="optional"></label>
-<label>Manager<input name=manager_number placeholder="optional"></label>
-<button>Call technician</button></form>{cards or '<p>No tickets yet.</p>'}
-</div> <!-- end view-tab-calls -->
-</main>
+  <main>
+    <!-- Executive KPI Metrics -->
+    <div class="metrics-grid">
+      <div class="metric-card metric-blue">
+        <div class="metric-label">Total Dispatch Tickets</div>
+        <div class="metric-value-row">
+          <div class="metric-number">{total_tickets}</div>
+          <span class="metric-badge badge-blue">100% Volume</span>
+        </div>
+      </div>
 
-<script>
-function showTab(tab) {{
-  var homeView = document.getElementById('view-tab-home');
-  var callsView = document.getElementById('view-tab-calls');
-  var homeBtn = document.getElementById('tab-home-btn');
-  var callsBtn = document.getElementById('tab-calls-btn');
-  
-  if (tab === 'calls') {{
-    homeView.style.display = 'none';
-    callsView.style.display = 'block';
-    homeBtn.style.color = '#57606a';
-    homeBtn.style.borderBottomColor = 'transparent';
-    homeBtn.style.fontWeight = '600';
-    callsBtn.style.color = '#0969da';
-    callsBtn.style.borderBottomColor = '#0969da';
-    callsBtn.style.fontWeight = '700';
-    window.location.hash = 'calls';
-  }} else {{
-    homeView.style.display = 'block';
-    callsView.style.display = 'none';
-    homeBtn.style.color = '#0969da';
-    homeBtn.style.borderBottomColor = '#0969da';
-    homeBtn.style.fontWeight = '700';
-    callsBtn.style.color = '#57606a';
-    callsBtn.style.borderBottomColor = 'transparent';
-    callsBtn.style.fontWeight = '600';
-    window.location.hash = 'home';
-  }}
-}}
+      <div class="metric-card metric-green">
+        <div class="metric-label">Calls Acknowledged</div>
+        <div class="metric-value-row">
+          <div class="metric-number">{ack_count}</div>
+          <span class="metric-badge badge-green">{ack_rate} Rate</span>
+        </div>
+      </div>
 
-if (window.location.hash === '#calls') {{
-  showTab('calls');
-}}
-</script>
-</body></html>"""
+      <div class="metric-card metric-amber">
+        <div class="metric-label">Active / Dialing</div>
+        <div class="metric-value-row">
+          <div class="metric-number">{calling_count}</div>
+          <span class="metric-badge badge-amber">IVR Calling</span>
+        </div>
+      </div>
+
+      <div class="metric-card metric-purple">
+        <div class="metric-label">Escalated / Pending</div>
+        <div class="metric-value-row">
+          <div class="metric-number">{escalated_count}</div>
+          <span class="metric-badge badge-purple">Tier 1 & 2</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Manual Dispatch Collapsible Box -->
+    <div class="dispatch-box">
+      <div class="dispatch-header" onclick="toggleDispatch()">
+        <div class="dispatch-title">
+          <span>⚡ Manual Outbound Voice Dispatcher</span>
+          <span style="font-size:11px;font-weight:500;color:#64748b;">(Click to test call flow)</span>
+        </div>
+        <span id="dispatch-toggle-icon" style="font-size:12px;color:#64748b;">▼ Open</span>
+      </div>
+      <div class="dispatch-body" id="dispatch-body">
+        <form method="POST" action="/trigger" class="dispatch-form">
+          <div class="form-group">
+            <label>Alert ID</label>
+            <input name="alert_id" value="ALM1001" required>
+          </div>
+          <div class="form-group">
+            <label>Ticket ID</label>
+            <input name="ticket_id" placeholder="INC0012345" required>
+          </div>
+          <div class="form-group">
+            <label>Site Details</label>
+            <input name="site_details" value="Site 2040, Olaya Branch, Riyadh">
+          </div>
+          <div class="form-group">
+            <label>Language</label>
+            <select name="language">
+              <option value="ask">Ask in Call (IVR Menu)</option>
+              {lang_options}
+            </select>
+          </div>
+          <div class="form-group">
+            <label>Ack Key</label>
+            <input name="ack_digit" value="1" style="max-width:80px;">
+          </div>
+          <div class="form-group">
+            <label>Technician Phone</label>
+            <input name="phone_number" placeholder="+9665XXXXXXXX" required>
+          </div>
+          <div class="form-group">
+            <label>Team Leader Phone</label>
+            <input name="team_leader_number" placeholder="Optional">
+          </div>
+          <div class="form-group">
+            <label>Manager Phone</label>
+            <input name="manager_number" placeholder="Optional">
+          </div>
+          <button type="submit" class="btn-dispatch">⚡ Dial Call</button>
+        </form>
+      </div>
+    </div>
+
+    <!-- Search & Filter Controls -->
+    <div class="controls-bar">
+      <div class="filter-pills">
+        <button class="filter-btn active" onclick="filterTickets('all', this)">All Tickets ({total_tickets})</button>
+        <button class="filter-btn" onclick="filterTickets('ack', this)">Acknowledged ({ack_count})</button>
+        <button class="filter-btn" onclick="filterTickets('calling', this)">Dialing ({calling_count})</button>
+        <button class="filter-btn" onclick="filterTickets('escalated', this)">Escalated ({escalated_count})</button>
+      </div>
+      <div class="search-box">
+        <span class="search-icon">🔍</span>
+        <input type="text" id="searchInput" class="search-input" placeholder="Search ticket, site, alert ID..." onkeyup="filterSearch()">
+      </div>
+    </div>
+
+    <!-- Tickets Feed -->
+    <div id="ticketsList">
+      {cards or '<div style="background:#fff;padding:40px;text-align:center;border-radius:12px;border:1px solid #e2e8f0;color:#64748b;">No active tickets in queue. Use Alert Intake API (/api/alerts) or the manual dispatcher above.</div>'}
+    </div>
+  </main>
+
+  <script>
+    function toggleDispatch() {{
+      var b = document.getElementById('dispatch-body');
+      var icon = document.getElementById('dispatch-toggle-icon');
+      if (b.style.display === 'block') {{
+        b.style.display = 'none';
+        icon.innerText = '▼ Open';
+      }} else {{
+        b.style.display = 'block';
+        icon.innerText = '▲ Close';
+      }}
+    }}
+
+    var currentCategory = 'all';
+
+    function filterTickets(cat, btn) {{
+      currentCategory = cat;
+      document.querySelectorAll('.filter-btn').forEach(function(b) {{ b.classList.remove('active'); }});
+      if (btn) btn.classList.add('active');
+      filterSearch();
+    }}
+
+    function filterSearch() {{
+      var q = (document.getElementById('searchInput').value || '').toLowerCase().trim();
+      var cards = document.querySelectorAll('.ticket-card');
+      cards.forEach(function(card) {{
+        var cat = card.getAttribute('data-category');
+        var text = (card.getAttribute('data-search') || '').toLowerCase();
+        var catMatch = (currentCategory === 'all' || cat === currentCategory);
+        var searchMatch = !q || text.indexOf(q) !== -1;
+        card.style.display = (catMatch && searchMatch) ? 'block' : 'none';
+      }});
+    }}
+  </script>
+</body>
+</html>"""
 
 
 # --------------------------------------------------------------------------- synchronous wait
