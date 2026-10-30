@@ -1476,11 +1476,15 @@ def normalize_intake_alert(item):
         "recipients": recipients
     }
 
-    # Normalized dictionary containing all fields + ticket_id + alert_id
+    event_id = str(_get("event_id", default=f"INTAKE-{ticket_id}-{stamp}")).strip()
+    # Normalized dictionary containing all fields + ticket_id + alert_id + event_timestamp
     normalized = {
         "ticket_id": ticket_id,
         "alert_id": alert_id,
         "alarm_id": alarm_id,
+        "event_id": event_id,
+        "event_timestamp": date_time,
+        "timestamp": date_time,
         "region": region,
         "site_name": site_name,
         "site_number": site_number,
@@ -1554,8 +1558,13 @@ def handle_alert_intake(payload):
             latest_call = q("SELECT dtmf, ack_result, outcome FROM calls WHERE ticket_id=? AND role='technician' ORDER BY id DESC LIMIT 1", (normalized["ticket_id"],), one=True) if t else None
             dtmf_pressed = latest_call["dtmf"] if (latest_call and latest_call["dtmf"]) else None
             acknowledged = (t["uc1_state"] == "ACKNOWLEDGED") if t else False
+            event_id = str(event.get("event_id") or normalized.get("event_id") or "").strip()
+            event_timestamp = str(event.get("event_time") or normalized.get("date_time") or "").strip()
             alert_entry = {
                 **normalized,
+                "event_id": event_id,
+                "event_timestamp": event_timestamp,
+                "timestamp": event_timestamp,
                 "ack_digit": ack_digit,
                 "reject_digit": reject_digit,
                 "dtmf_pressed": dtmf_pressed,
@@ -1703,8 +1712,13 @@ def get_alerts_view(payload=None):
                 dtmf_pressed = latest_call["dtmf"] if (latest_call and latest_call["dtmf"]) else None
                 acknowledged = (t["uc1_state"] == "ACKNOWLEDGED") if t else False
 
+                evt_id = str(item.get("event_id") or norm.get("event_id") or (t.get("last_event_id") if t else "") or "").strip()
+                evt_time = str(item.get("event_timestamp") or item.get("timestamp") or norm.get("date_time") or (t.get("last_event_time") if t else "") or "").strip()
                 alert_dict = {
                     **norm,
+                    "event_id": evt_id,
+                    "event_timestamp": evt_time,
+                    "timestamp": evt_time,
                     "ack_digit": ack_digit,
                     "reject_digit": reject_digit,
                     "dtmf_pressed": dtmf_pressed,
@@ -1764,10 +1778,15 @@ def get_alerts_view(payload=None):
             tl_r = recipients.get("team_leader") or {}
             mgr_r = recipients.get("manager") or {}
 
+            evt_id_db = t.get("last_event_id") or f"EVT-{tid}"
+            evt_time_db = t.get("last_event_time") or t.get("created_at") or ""
             alert_dict = {
                 "ticket_id": tid,
                 "alert_id": alert_id,
                 "alarm_id": t["alarm_id"],
+                "event_id": evt_id_db,
+                "event_timestamp": evt_time_db,
+                "timestamp": evt_time_db,
                 "region": t.get("region") or "",
                 "site_name": t["site_name"] or "",
                 "site_number": t["site_number"] or "",
@@ -1779,7 +1798,7 @@ def get_alerts_view(payload=None):
                 "manager_name": mgr_r.get("name", ""),
                 "manager_number": mgr_r.get("mobile", ""),
                 "severity": t["severity"] or "Major",
-                "date_time": t["last_event_time"] or t["created_at"],
+                "date_time": evt_time_db,
                 "country_code": t.get("country_code") or "+966",
                 "alert_status": t["status"] or "Active",
                 "ack_digit": ack_digit,
