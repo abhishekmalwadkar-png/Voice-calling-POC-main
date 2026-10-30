@@ -334,6 +334,163 @@ def legacy_view(tid):
 
 
 # --------------------------------------------------------------------------- dashboard
+
+def login_page_html(error_msg=None):
+    err_html = f'<div class="error-banner">{error_msg}</div>' if error_msg else ''
+    return f"""<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Login · NextAsk Voice Platform</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <style>
+    * {{ box-sizing: border-box; margin: 0; padding: 0; }}
+    body {{
+      font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      background: #090d16;
+      color: #f8fafc;
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 20px;
+      background-image: 
+        radial-gradient(circle at 20% 20%, rgba(56, 189, 248, 0.08) 0%, transparent 40%),
+        radial-gradient(circle at 80% 80%, rgba(168, 85, 247, 0.06) 0%, transparent 45%);
+    }}
+    .login-card {{
+      background: rgba(16, 23, 38, 0.9);
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      border-radius: 16px;
+      padding: 40px;
+      width: 100%;
+      max-width: 420px;
+      box-shadow: 0 20px 40px rgba(0, 0, 0, 0.5);
+      backdrop-filter: blur(12px);
+    }}
+    .logo-badge {{
+      width: 48px;
+      height: 48px;
+      border-radius: 12px;
+      background: linear-gradient(135deg, #38bdf8, #3b82f6);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 24px;
+      margin: 0 auto 20px;
+      box-shadow: 0 0 20px rgba(56, 189, 248, 0.4);
+    }}
+    h1 {{
+      font-size: 22px;
+      font-weight: 700;
+      text-align: center;
+      color: #fff;
+      margin-bottom: 6px;
+      letter-spacing: -0.02em;
+    }}
+    .subtitle {{
+      font-size: 13px;
+      color: #94a3b8;
+      text-align: center;
+      margin-bottom: 28px;
+    }}
+    .error-banner {{
+      background: rgba(239, 68, 68, 0.15);
+      border: 1px solid rgba(239, 68, 68, 0.3);
+      color: #fca5a5;
+      padding: 10px 14px;
+      border-radius: 8px;
+      font-size: 13px;
+      margin-bottom: 20px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }}
+    .form-group {{
+      margin-bottom: 20px;
+    }}
+    label {{
+      display: block;
+      font-size: 12.5px;
+      font-weight: 600;
+      color: #cbd5e1;
+      margin-bottom: 8px;
+    }}
+    input {{
+      width: 100%;
+      padding: 12px 14px;
+      background: #070a10;
+      border: 1px solid rgba(255, 255, 255, 0.12);
+      border-radius: 8px;
+      color: #fff;
+      font-size: 14px;
+      font-family: inherit;
+      transition: all 0.2s ease;
+    }}
+    input:focus {{
+      outline: none;
+      border-color: #38bdf8;
+      box-shadow: 0 0 0 3px rgba(56, 189, 248, 0.2);
+    }}
+    .btn-login {{
+      width: 100%;
+      padding: 12px;
+      background: linear-gradient(135deg, #38bdf8, #3b82f6);
+      color: #fff;
+      border: none;
+      border-radius: 8px;
+      font-size: 14px;
+      font-weight: 600;
+      cursor: pointer;
+      box-shadow: 0 4px 14px rgba(56, 189, 248, 0.3);
+      transition: transform 0.15s ease, box-shadow 0.15s ease;
+      margin-top: 8px;
+    }}
+    .btn-login:hover {{
+      transform: translateY(-1px);
+      box-shadow: 0 6px 20px rgba(56, 189, 248, 0.45);
+    }}
+    .footer-note {{
+      text-align: center;
+      margin-top: 24px;
+      font-size: 12px;
+      color: #64748b;
+    }}
+  </style>
+</head>
+<body>
+  <div class="login-card">
+    <div class="logo-badge">⚡</div>
+    <h1>NextAsk Voice Platform</h1>
+    <p class="subtitle">Enter administrative credentials to access console & logs</p>
+
+    {err_html}
+
+    <form method="POST" action="/login">
+      <div class="form-group">
+        <label for="username">Username</label>
+        <input type="text" id="username" name="username" placeholder="admin" required autofocus>
+      </div>
+
+      <div class="form-group">
+        <label for="password">Password</label>
+        <input type="password" id="password" name="password" placeholder="••••••••" required>
+      </div>
+
+      <button type="submit" class="btn-login">Sign In & Open Logs &rarr;</button>
+    </form>
+
+    <div class="footer-note">
+      AutomationEdge FLM Helpdesk · Secure Gateway
+    </div>
+  </div>
+</body>
+</html>"""
+
+
 def dashboard_html():
     cards = ""
     for v in queries.list_tickets({"limit": 25}):
@@ -370,6 +527,7 @@ ul{{margin:8px 0;padding-left:18px}} small{{color:#889}} .dl-btn{{background:#0b
 <div style="display:flex;align-items:center;gap:10px;">
   <a href="/docs" target="_blank" style="background:rgba(255,255,255,0.15);border:1px solid rgba(255,255,255,0.3);color:#fff;padding:6px 12px;border-radius:6px;text-decoration:none;font-size:13px;font-weight:600;">📖 API Docs</a>
   <a href="/api/logs/download" class="dl-btn" download style="float:none;">📥 Download Logs</a>
+  <a href="/logout" style="background:rgba(220,38,38,0.85);border:1px solid rgba(255,255,255,0.4);color:#fff;padding:6px 12px;border-radius:6px;text-decoration:none;font-size:13px;font-weight:600;">🚪 Logout</a>
 </div>
 </header>
 
@@ -512,6 +670,17 @@ TICKET_PATH = re.compile(r"^/api/tickets/([^/]+)(/timeline|/followup)?$")
 
 
 class Handler(BaseHTTPRequestHandler):
+    def _get_cookie_session(self):
+        cookie_header = self.headers.get("Cookie", "")
+        if "flm_session=" in cookie_header:
+            for part in cookie_header.split(";"):
+                part = part.strip()
+                if part.startswith("flm_session="):
+                    token = part[len("flm_session="):].strip()
+                    if token and store.verify_auth_token(token):
+                        return token
+        return None
+
     def _send(self, code, body, ctype="text/html; charset=utf-8", extra=None):
         data = body.encode("utf-8")
         try:
@@ -717,7 +886,7 @@ class Handler(BaseHTTPRequestHandler):
                 store.audit(None, "twilio_signature_rejected", f"Rejected unsigned/forged request to {self.path}")
             return ok
         if path in ("/api/health", "/health", "/api/authenticate", "/authenticate", "/api/auth", "/api/login",
-                    "/api/authorize", "/api/authorization", "/api/verify", "/docs", "/api/docs", "/documentation"):
+                    "/api/authorize", "/api/authorization", "/api/verify", "/docs", "/api/docs", "/documentation", "/login", "/logout"):
             return True
         if path.startswith("/api/"):
             sent_key = self._extract_token(form)
@@ -731,7 +900,9 @@ class Handler(BaseHTTPRequestHandler):
             if not CFG["api_key"] and not sent_key:
                 return self._from_this_pc()
             return False
-        return self._from_this_pc()  # dashboard and its call form: this PC only
+        if path in ("/", "/login", "/logout"):
+            return True
+        return self._from_this_pc()
 
     def do_GET(self):
         path, params, form = self._parse()
@@ -745,7 +916,30 @@ class Handler(BaseHTTPRequestHandler):
                 "required_header": "X-API-Key"
             })
         try:
+            if path == "/logout":
+                self.send_response(303)
+                self.send_header("Set-Cookie", "flm_session=; Path=/; Max-Age=0; HttpOnly; SameSite=Lax")
+                self.send_header("Location", "/login")
+                self.end_headers()
+                return
+
+            if path == "/login":
+                if self._get_cookie_session():
+                    self.send_response(303)
+                    self.send_header("Location", "/#calls")
+                    self.end_headers()
+                    return
+                return self._send(200, login_page_html())
+
             if path == "/":
+                # Check if user is logged in
+                session_token = self._get_cookie_session()
+                if not session_token:
+                    # Redirect to /login
+                    self.send_response(303)
+                    self.send_header("Location", "/login")
+                    self.end_headers()
+                    return
                 return self._send(200, dashboard_html())
             if path in ("/docs", "/api/docs", "/documentation"):
                 return self._send(200, docs_html())
@@ -912,6 +1106,20 @@ class Handler(BaseHTTPRequestHandler):
         if form is None and path != "/api/reload":
             return self._json(400, {"error": "body is not valid JSON"})
         try:
+            if path == "/login":
+                username = str(form.get("username") or "").strip()
+                password = str(form.get("password") or "").strip()
+                user = store.verify_user(username, password)
+                if not user:
+                    return self._send(401, login_page_html("Invalid username or password. Please try again."))
+                token, ttl = store.create_auth_token(user["username"])
+                store.audit(None, "web_login_success", f"User '{username}' logged in via web portal")
+                self.send_response(303)
+                self.send_header("Set-Cookie", f"flm_session={token}; Path=/; Max-Age={ttl}; HttpOnly; SameSite=Lax")
+                self.send_header("Location", "/#calls")
+                self.end_headers()
+                return
+
             if path in ("/api/health", "/health"):
                 return self._json(200, {
                     "status": "ok",

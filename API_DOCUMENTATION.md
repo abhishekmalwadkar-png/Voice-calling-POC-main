@@ -282,37 +282,49 @@ Notice that the response includes **`event_id`** and **`event_timestamp`** at th
 
 ## 5. Payload Field Specifications & PostgreSQL Data Types
 
-The table below lists all fields passed in the request body payload. Data types are mapped directly from the production PostgreSQL schema (`FLMHelpdesk (1).sql`: `tb_tickets`, `tb_nextask_events`, `tb_assignments`). Fields marked with **[Additional Field]** denote extensions introduced in this architecture.
+### 5.1 Additional Fields Summary
 
-| Field Name | PostgreSQL Data Type (`FLMHelpdesk.sql`) | Sample Value | Purpose / Description | Note |
-| :--- | :--- | :--- | :--- | :--- |
-| `batch_id` | `VARCHAR(50)` (`tb_nextask_events.batch_id`) | `"BATCH001"` | Identify and group a batch of alerts | **[Additional Field]** |
-| `event_timestamp` | `TIMESTAMP WITH TIME ZONE` (`tb_nextask_events.event_timestamp`) | `"2026-10-30T10:30:00+03:00"` | Record root batch generation timestamp | **[Additional Field]** |
-| `branch.branch_id` | `VARCHAR(50)` (`tb_tickets.branch_id`) | `"BR001"` | Unique identifier of the facility / branch | **[Additional Field]** |
-| `branch.branch_name` | `VARCHAR(150)` (`tb_tickets.branch_name`) | `"Riyadh Main Office"` | Physical facility / branch name | Standard |
-| `branch.site_number` | `VARCHAR(50)` (`tb_tickets.site_number`) | `"SITE001"` | Site code / branch number | Standard |
-| `alerts[].event_id` | `VARCHAR(50)` (`tb_nextask_events.event_id`) | `"EVT001"` | Unique event identifier for idempotency | Standard |
-| `alerts[].event_type` | `VARCHAR(60)` (`tb_nextask_events.event_type`) | `"ASSIGNMENT_REASSIGNED"` | Dispatch lifecycle action (`ASSIGNMENT_CREATED` / `REASSIGNED`) | Standard |
-| `alerts[].event_version` | `BIGINT` (`tb_nextask_events.event_version`) | `2` | Sequence / revision version number | Standard |
-| `alerts[].alert_id` | `VARCHAR(50)` (`tb_tickets.alert_id`) | `"ALT1001"` | Separate alert reference distinct from ticket | **[Additional Field]** |
-| `alerts[].ticket.ticket_id` | `VARCHAR(50)` (`tb_tickets.ticket_id`) | `"INC1001"` | Primary incident ticket reference number | Standard |
-| `alerts[].ticket.alarm_id` | `VARCHAR(50)` (`tb_tickets.alarm_id`) | `"ALM5001"` | Monitoring sensor / alarm system ID | Standard |
-| `alerts[].ticket.issue_description` | `TEXT` (`tb_tickets.issue_description`) | `"Network connectivity failure"` | Problem description read to technician in call | Standard |
-| `alerts[].ticket.alarm_type` | `VARCHAR(100)` (`tb_tickets.alarm_type`) | `"Network Failure"` | Classification of alarm (Power, HVAC, Network) | Standard |
-| `alerts[].ticket.severity` | `VARCHAR(30)` (`tb_tickets.severity`) | `"Critical"` | Ticket priority (`Critical`, `Major`, `Minor`) | Standard |
-| `alerts[].ticket.ticket_status` | `VARCHAR(50)` (`tb_tickets.ticket_status`) | `"Assigned"` | Current lifecycle status of the ticket | Standard |
-| `alerts[].ticket.alarm_status` | `VARCHAR(50)` (`tb_tickets.alarm_status`) | `"Active"` | Alarm sensor state (`Active`, `Resolved`) | Standard |
-| `alerts[].assignment.assignment_id` | `VARCHAR(50)` (`tb_assignments.assignment_id`) | `"ASN002"` | Current dispatch assignment ID | Standard |
-| `alerts[].assignment.assignment_type` | `VARCHAR(30)` (`tb_assignments.assignment_type`) | `"REASSIGNMENT"` | Assignment type: `INITIAL` or `REASSIGNMENT` | **[Additional Field]** |
-| `alerts[].assignment.previous_assignment_id` | `VARCHAR(50)` (`tb_assignments.previous_assignment_id`) | `null` / `"ASN001"` | Prior assignment ID during reassignment | **[Additional Field]** |
-| `alerts[].assignment.assigned_at` | `TIMESTAMP WITH TIME ZONE` (`tb_assignments.assigned_at`) | `"2026-10-30T10:30:00+03:00"` | Timestamp when assignment was made | **[Additional Field]** |
-| `alerts[].technician.technician_id` | `VARCHAR(50)` (`tb_assignments.technician_id`) | `"ENG002"` | Field technician employee / staff code | Standard |
-| `alerts[].technician.name` | `VARCHAR(150)` (`tb_assignments.technician_name`) | `"Ali"` | Technician full name | Standard |
-| `alerts[].technician.mobile_number` | `VARCHAR(30)` (`tb_assignments.technician_mobile`) | `"+9665XXXXXXXX"` | Phone number dialed for primary call | Standard |
-| `alerts[].technician.preferred_language` | `VARCHAR(20)` (`tb_assignments.preferred_language`) | `"English"` / `"Arabic"` | Preferred call IVR voice language | Standard |
-| `alerts[].team_leader.*` | `JSONB` (`tb_assignments.team_leader_details`) | `{"name":"Mohammed", "mobile_number":"..."}` | 1st escalation contact dialed if tech misses call | Standard |
-| `alerts[].manager.*` | `JSONB` (`tb_assignments.manager_details`) | `{"name":"Khalid", "mobile_number":"..."}` | 2nd escalation contact dialed if TL misses call | Standard |
-| `alerts[].acknowledgement.dtmf_digit` | `VARCHAR(10)` (`tb_assignments.dtmf_digit`) | `"1"` | DTMF key digit required to accept call | Standard |
+The following 7 fields are additional enhancements introduced in the NextAsk Gateway batch architecture:
+
+| No. | Additional field | Sample value | Purpose |
+| :---: | :--- | :--- | :--- |
+| 1 | `batch_id` | `BATCH001` | Identify a batch of alerts |
+| 2 | `event_timestamp` (batch level) | `2026-10-30T10:30:00+03:00` | Record the batch timestamp |
+| 3 | `branch.branch_id` | `BR001` | Identify the branch |
+| 4 | `alert_id` | `ALT1001` | Separate alert reference |
+| 5 | `assignment.assignment_type` | `INITIAL` / `REASSIGNMENT` | Identify assignment type |
+| 6 | `assignment.assigned_at` | `2026-10-30T10:20:00+03:00` | Record assignment time |
+| 7 | `assignment.previous_assignment_id` | `null` / `ASN001` | Identify the previous assignment during reassignment |
+
+---
+
+### 5.2 Field Comparison & PostgreSQL Data Types
+
+Comparison between previous fields and current gateway payload fields, along with their PostgreSQL schema definitions (`FLMHelpdesk (1).sql`):
+
+| Category | Previous Field | Additional / Gateway Field | Data Type | Sample Value | Purpose |
+| :--- | :--- | :--- | :--- | :--- | :--- |
+| **Batch** | *(none)* | `batch_id` | `VARCHAR(50)` | `BATCH001` | Group alerts in single payload |
+| **Batch** | *(none)* | `event_timestamp` | `TIMESTAMPTZ` | `2026-10-30T10:30:00+03:00` | Batch creation timestamp |
+| **Event** | `event_id` | `event_id` | `VARCHAR(50)` | `EVT001` | Unique event reference |
+| **Event** | `event_type` | `event_type` | `VARCHAR(60)` | `ASSIGNMENT_REASSIGNED` | Lifecycle dispatch action |
+| **Ticket** | `ticket_id` | `ticket.ticket_id` | `VARCHAR(50)` | `INC1001` | Incident ticket ID |
+| **Ticket** | `alarm_id` | `ticket.alarm_id` | `VARCHAR(50)` | `ALM5001` | Alarm sensor reference |
+| **Alert** | *(none)* | `alert_id` | `VARCHAR(50)` | `ALT1001` | Dedicated alert ID |
+| **Site** | `site_name` | `branch.branch_name` | `VARCHAR(150)` | `Riyadh Main Office` | Physical facility name |
+| **Site** | `site_number` | `branch.site_number` | `VARCHAR(50)` | `SITE001` | Branch/site code |
+| **Site** | *(none)* | `branch.branch_id` | `VARCHAR(50)` | `BR001` | Branch database ID |
+| **Assign** | `assignment_id` | `assignment.assignment_id` | `VARCHAR(50)` | `ASN002` | Current dispatch assignment |
+| **Assign** | *(none)* | `assignment.assignment_type` | `VARCHAR(30)` | `REASSIGNMENT` | INITIAL vs REASSIGNMENT |
+| **Assign** | *(none)* | `assignment.previous_assignment_id` | `VARCHAR(50)` | `null` / `ASN001` | Prior assignment reference |
+| **Assign** | *(none)* | `assignment.assigned_at` | `TIMESTAMPTZ` | `2026-10-30T10:20:00+03:00` | Record assignment time |
+| **Contact** | `technician_name` | `technician.name` | `VARCHAR(150)` | `Ali` | Field engineer name |
+| **Contact** | `technician_mobile` | `technician.mobile_number` | `VARCHAR(30)` | `+9665XXXXXXXX` | Technician phone number |
+| **Contact** | *(none)* | `technician.preferred_language` | `VARCHAR(20)` | `English` / `Arabic` | Voice audio language |
+| **DTMF** | `ack_digit` | `acknowledgement.dtmf_digit` | `VARCHAR(10)` | `1` | Key to acknowledge call |
+
+> [!NOTE]
+> Additional ticket context attributes (`ticket.issue_description`, `ticket.severity`, `ticket.alarm_type`) and escalation contacts (`team_leader`, `manager`) remain fully supported in the JSON payload and database columns (`tb_tickets`, `tb_assignments`).
 
 ---
 
