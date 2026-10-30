@@ -918,6 +918,7 @@ class Handler(BaseHTTPRequestHandler):
                 self.send_response(303)
                 self.send_header("Set-Cookie", "flm_session=; Path=/; Max-Age=0; HttpOnly; SameSite=Lax")
                 self.send_header("Location", "/login")
+                self.send_header("Cache-Control", "no-cache, no-store, must-revalidate")
                 self.end_headers()
                 return
 
@@ -925,9 +926,10 @@ class Handler(BaseHTTPRequestHandler):
                 if self._get_cookie_session():
                     self.send_response(303)
                     self.send_header("Location", "/")
+                    self.send_header("Cache-Control", "no-cache, no-store, must-revalidate")
                     self.end_headers()
                     return
-                return self._send(200, login_page_html())
+                return self._send(200, login_page_html(), extra={"Cache-Control": "no-cache, no-store, must-revalidate"})
 
             if path == "/":
                 # Check if user is logged in
@@ -936,9 +938,10 @@ class Handler(BaseHTTPRequestHandler):
                     # Redirect to /login
                     self.send_response(303)
                     self.send_header("Location", "/login")
+                    self.send_header("Cache-Control", "no-cache, no-store, must-revalidate")
                     self.end_headers()
                     return
-                return self._send(200, dashboard_html())
+                return self._send(200, dashboard_html(), extra={"Cache-Control": "no-cache, no-store, must-revalidate"})
             if path in ("/docs", "/api/docs", "/documentation"):
                 return self._send(200, docs_html())
             if path == "/api/docs/raw":
