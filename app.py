@@ -465,7 +465,7 @@ def login_page_html(error_msg=None):
   <div class="login-card">
     <div class="logo-badge">⚡</div>
     <h1>NextAsk Voice Platform</h1>
-    <p class="subtitle">Enter administrative credentials to access console & logs</p>
+    <p class="subtitle">Enter administrative credentials to access the portal</p>
 
     {err_html}
 
@@ -480,7 +480,7 @@ def login_page_html(error_msg=None):
         <input type="password" id="password" name="password" placeholder="••••••••" required>
       </div>
 
-      <button type="submit" class="btn-login">Sign In & Open Logs &rarr;</button>
+      <button type="submit" class="btn-login">Sign In &rarr;</button>
     </form>
 
     <div class="footer-note">
@@ -926,7 +926,7 @@ class Handler(BaseHTTPRequestHandler):
             if path == "/login":
                 if self._get_cookie_session():
                     self.send_response(303)
-                    self.send_header("Location", "/#calls")
+                    self.send_header("Location", "/")
                     self.end_headers()
                     return
                 return self._send(200, login_page_html())
@@ -1116,7 +1116,7 @@ class Handler(BaseHTTPRequestHandler):
                 store.audit(None, "web_login_success", f"User '{username}' logged in via web portal")
                 self.send_response(303)
                 self.send_header("Set-Cookie", f"flm_session={token}; Path=/; Max-Age={ttl}; HttpOnly; SameSite=Lax")
-                self.send_header("Location", "/#calls")
+                self.send_header("Location", "/")
                 self.end_headers()
                 return
 
