@@ -1579,7 +1579,18 @@ def handle_alert_intake(payload):
     for idx, item in enumerate(items):
         try:
             event, normalized = normalize_intake_alert(item)
-            code, body = ingest_event(event)
+            # Ingest event without triggering outbound calls (data ingestion only)
+            ev, fields, recipients = normalize_event(event)
+            tid = fields["ticket_id"]
+            with ticket_lock(tid):
+                t = get_ticket(tid)
+                previous = t
+                t = _apply_state(tid, t, ev, fields, recipients)
+                q("INSERT INTO events (event_id, ticket_id, event_type, version, event_time, received_at, result, note, payload) "
+                  "VALUES (?,?,?,?,?,?,?,?,?)",
+                  (ev["event_id"], tid, ev["event_type"], ev["version"], ev["event_time"], now_iso(),
+                   "accepted", "data intake stored (no auto-call)", json.dumps(event, ensure_ascii=False)))
+                code, body = 200, {"result": "accepted", "actions": ["data_stored"]}
             t = get_ticket(normalized["ticket_id"])
             ack_digit = t["ack_digit"] if t else str(event.get("ack_digit") or "1")
             reject_digit = t["reject_digit"] if t else str(event.get("reject_digit") or "9")
