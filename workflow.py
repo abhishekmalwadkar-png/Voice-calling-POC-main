@@ -1586,7 +1586,7 @@ def handle_alert_intake(payload):
                 t = get_ticket(tid)
                 previous = t
                 t = _apply_state(tid, t, ev, fields, recipients)
-                q("INSERT INTO events (event_id, ticket_id, event_type, version, event_time, received_at, result, note, payload) "
+                q("INSERT OR REPLACE INTO events (event_id, ticket_id, event_type, version, event_time, received_at, result, note, payload) "
                   "VALUES (?,?,?,?,?,?,?,?,?)",
                   (ev["event_id"], tid, ev["event_type"], ev["version"], ev["event_time"], now_iso(),
                    "accepted", "data intake stored (no auto-call)", json.dumps(event, ensure_ascii=False)))
