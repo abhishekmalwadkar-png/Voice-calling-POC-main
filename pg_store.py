@@ -259,18 +259,7 @@ def save_alert_intake(payload):
                 ack = item.get("acknowledgement") if isinstance(item.get("acknowledgement"), dict) else {}
                 dtmf_digit = str(ack.get("dtmf_digit") or item.get("ack_digit") or "1")
 
-                # 1. Insert into tb_nextask_events (Event ID, event type, event version, event timestamp, batch ID, payload JSON)
-                cur.execute("""
-                    INSERT INTO public.tb_nextask_events (
-                        batch_id, event_id, ticket_id, assignment_id, event_type,
-                        event_version, event_timestamp, payload_json, processing_status
-                    ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
-                """, (
-                    batch_id, event_id, ticket_id, assignment_id, event_type,
-                    event_version, event_ts, Json(item), "Received"
-                ))
-
-                # 2. Insert/Upsert into tb_tickets (Ticket ID, Alert ID, Alarm ID, branch/site details, issue description, severity, ticket status, alarm status)
+                # 1. Insert/Upsert into tb_tickets FIRST (required by FK constraint tb_nextask_events_ticket_id_fkey)
                 cur.execute("""
                     INSERT INTO public.tb_tickets (
                         ticket_id, alarm_id, alert_id, branch_id, branch_name,
@@ -300,6 +289,17 @@ def save_alert_intake(payload):
                     site_number, site_name, issue_desc, alarm_type,
                     severity, ticket_status, alarm_status,
                     event_ts, event_version, event_ts
+                ))
+
+                # 2. Insert into tb_nextask_events (Event ID, event type, event version, event timestamp, batch ID, payload JSON)
+                cur.execute("""
+                    INSERT INTO public.tb_nextask_events (
+                        batch_id, event_id, ticket_id, assignment_id, event_type,
+                        event_version, event_timestamp, payload_json, processing_status
+                    ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+                """, (
+                    batch_id, event_id, ticket_id, assignment_id, event_type,
+                    event_version, event_ts, Json(item), "Received"
                 ))
 
                 # 3. Insert/Upsert into tb_assignments (Assignment ID, assignment type, technician details, Team Leader and Manager details, DTMF digit, assignment timestamp)
