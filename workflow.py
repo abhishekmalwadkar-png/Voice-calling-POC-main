@@ -566,13 +566,26 @@ def send_whatsapp_alert(t, role, rec, call_cid=None, alert_type_override=None, c
 
     wait_time = delay_sec if delay_sec is not None else (2.0 if role == "manager" else 0.0)
 
+    site_name = t.get("site_name") or t.get("site_number") or "Site N/A"
+    attempt_no = str(t.get("esc_detail") or 2)
+    reason = t.get("esc_reason") or "no_acknowledgement"
+    reject_reason_text = t.get("uc1_reject_reason") or "Declined assignment"
+
     def _do_send():
         if wait_time > 0:
             time.sleep(wait_time)
         try:
-            status_code, resp_body = ae_whatsapp.send_whatsapp(rec["mobile"], msg)
-            print(f"[whatsapp] whatsapp message send to {display_name} ({rec['mobile']}) - Status: {status_code}", flush=True)
-            audit(tid, "whatsapp_sent", f"{role_title} {alert_type.lower()} WhatsApp message sent to {display_name} ({rec['mobile']})", call_id=call_cid)
+            # Use WhatsApp template if reason is explicit rejection or no answer
+            if reason == "rejected":
+                status_code, resp_body = ae_whatsapp.send_explicit_rejection_alert(
+                    rec["mobile"], tid, site_name, tech_name, reject_reason_text, attempt_no
+                )
+            else:
+                status_code, resp_body = ae_whatsapp.send_no_answer_alert(
+                    rec["mobile"], tid, site_name, tech_name, attempt_no
+                )
+            print(f"[whatsapp] WhatsApp template message sent to {display_name} ({rec['mobile']}) - Status: {status_code}", flush=True)
+            audit(tid, "whatsapp_sent", f"{role_title} {alert_type.lower()} WhatsApp template sent to {display_name} ({rec['mobile']})", call_id=call_cid)
         except Exception as ex:  # noqa: BLE001
             print(f"[whatsapp] Failed to send whatsapp message to {display_name} ({rec['mobile']}): {ex}", flush=True)
             audit(tid, "whatsapp_error", f"Could not send WhatsApp message to {role_title} ({display_name}): {ex}", call_id=call_cid)

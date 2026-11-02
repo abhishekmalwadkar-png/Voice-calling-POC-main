@@ -1,11 +1,11 @@
-"""360dialog WhatsApp API client.
-Sends outbound WhatsApp messages using 360dialog Cloud API.
+"""360dialog WhatsApp API client using pre-approved Meta WABA Templates.
 API: https://waba-v2.360dialog.io/messages
 Header: D360-API-KEY
 """
 import json
 import urllib.error
 import urllib.request
+from datetime import datetime
 
 from config import CFG
 
@@ -13,8 +13,18 @@ DEFAULT_360_API_KEY = "xCyHUYyCA24Dq6iWgISlP8hdAK"
 DEFAULT_360_URL = "https://waba-v2.360dialog.io/messages"
 
 
-def send_whatsapp(phone_number, message, timeout=15):
-    """Send a WhatsApp text message to a phone number using 360dialog API."""
+def _format_date(dt_str=None):
+    try:
+        if dt_str:
+            d = datetime.fromisoformat(str(dt_str).replace("Z", "+00:00"))
+            return d.strftime("%d-%b-%Y")
+    except Exception:
+        pass
+    return datetime.now().strftime("%d-%b-%Y")
+
+
+def send_whatsapp_template(phone_number, template_name, parameters, lang_code="en", timeout=15):
+    """Send an approved WhatsApp template via 360dialog."""
     api_key = CFG.get("d360_api_key") or DEFAULT_360_API_KEY
     url = CFG.get("d360_api_url") or DEFAULT_360_URL
 
@@ -22,16 +32,24 @@ def send_whatsapp(phone_number, message, timeout=15):
     if len(clean_number) == 10:
         clean_number = "91" + clean_number
 
-    clean_message = str(message).replace("\\n", "\n").replace("\r\n", "\n")
+    body_params = [{"type": "text", "text": str(p)} for p in parameters]
 
     payload = {
-        "messaging_product": "whatsapp",
-        "recipient_type": "individual",
         "to": clean_number,
-        "type": "text",
-        "text": {
-            "body": clean_message
-        }
+        "type": "template",
+        "template": {
+            "name": template_name,
+            "language": {
+                "code": lang_code
+            },
+            "components": [
+                {
+                    "type": "body",
+                    "parameters": body_params
+                }
+            ]
+        },
+        "messaging_product": "whatsapp"
     }
 
     req = urllib.request.Request(
@@ -47,10 +65,59 @@ def send_whatsapp(phone_number, message, timeout=15):
         return resp.status, resp.read().decode("utf-8")
 
 
-if __name__ == "__main__":
-    import sys
-    target = sys.argv[1] if len(sys.argv) > 1 else "7709890643"
-    msg = sys.argv[2] if len(sys.argv) > 2 else "Test message from 360dialog WhatsApp client"
-    print(f"Sending WhatsApp message to {target} via 360dialog...")
-    status, body = send_whatsapp(target, msg)
-    print(f"Status: {status}, Response: {body}")
+def send_no_answer_alert(phone_number, ticket_id, site, tech_name, attempt_no, date_str=None):
+    """
+    Template: shabakkat_noanswer (6 parameters):
+    1: ticket_id
+    2: site
+    3: technician_name
+    4: attempt_no
+    5: reason / status ("no answer" or "Did not answer")
+    6: date (e.g. 02-Nov-2026)
+    """
+    date_val = _format_date(date_str)
+    params = [ticket_id, site, tech_name, attempt_no, "no answer", date_val]
+    return send_whatsapp_template(phone_number, "shabakkat_noanswer", params)
+
+
+def send_explicit_rejection_alert(phone_number, ticket_id, site, tech_name, reason_desc, attempt_no, date_str=None):
+    """
+    Template: shabakkat_explicitrejection (7 parameters):
+    1: ticket_id
+    2: site
+    3: technician_name
+    4: reason_desc (e.g. "Busy on another site")
+    5: reason_desc (repeated/detail)
+    6: attempt_no
+    7: date (e.g. 02-Nov-2026)
+    """
+    date_val = _format_date(date_str)
+    r_desc = reason_desc or "Declined assignment"
+    params = [ticket_id, site, tech_name, r_desc, r_desc, attempt_no, date_val]
+    return send_whatsapp_template(phone_number, "shabakkat_explicitrejection", params)
+
+
+# Backwards compatibility fallback if free text is invoked
+def send_whatsapp(phone_number, message, timeout=15):
+    """Fallback text sender."""
+    api_key = CFG.get("d360_api_key") or DEFAULT_360_API_KEY
+    url = CFG.get("d360_api_url") or DEFAULT_360_URL
+    clean_number = "".join(str(phone_number).split()).lstrip("+")
+    if len(clean_number) == 10:
+        clean_number = "91" + clean_number
+
+    payload = {
+        "messaging_product": "whatsapp",
+        "recipient_type": "individual",
+        "to": clean_number,
+        "type": "text",
+        "text": {"body": str(message)}
+    }
+    req = urllib.request.Request(
+        url,
+        data=json.dumps(payload).encode("utf-8"),
+        headers={"Content-Type": "application/json", "D360-API-KEY": api_key},
+        method="POST"
+    )
+    with urllib.request.urlopen(req, timeout=timeout) as resp:
+        return resp.status, resp.read().decode("utf-8")
