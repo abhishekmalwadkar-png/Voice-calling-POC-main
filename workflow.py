@@ -1124,6 +1124,12 @@ def ticket_view(tid):
             "escalation": esc,
             "response_summary": _summary(current),
         },
+        "technician_call_status": (
+            "answered" if (t["uc1_state"] == "ACKNOWLEDGED" or any(c.get("picked_up") for c in tech))
+            else ("no_answer" if (t.get("esc_reason") == "no_acknowledgement" or len(tech) >= 2)
+            else ("rejected" if t.get("esc_reason") == "rejected"
+            else "pending"))
+        ),
         "rejection_reason": t["uc1_reject_reason"],
         "followup": {"state": t["followup_state"], "due_at": t["followup_due_at"]},
         "pending_timers": timers,
@@ -1168,6 +1174,7 @@ def wait_for_result(tid, assignment_id, until="technician", timeout=300):
     view = ticket_view(tid)
     return {
         "call_result": decision if done else "pending",
+        "technician_call_status": view.get("technician_call_status", "pending"),
         "rejection_reason": view["rejection_reason"],
         "technician_reject_reason": view["rejection_reason"],
         "timed_out": not done,
@@ -1546,7 +1553,8 @@ def handle_alert_intake(payload):
 
     # Persist alert intake payload into PostgreSQL production database
     try:
-        import pg_store
+        import importlib, pg_store
+        importlib.reload(pg_store)
         pg_store.save_alert_intake(payload)
     except Exception as e:
         logger.warning(f"PostgreSQL persistence notice: {e}")

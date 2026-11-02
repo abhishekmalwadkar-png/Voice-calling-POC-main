@@ -36,7 +36,7 @@ LANGS = {
         "emergency_reason_no_answer": "did not answer the call",
         "emergency_reason_rejected": "has rejected the assignment",
         "reminder": "Reminder from the Automation Edge helpdesk. Ticket {t}, at site {s}, is still waiting for "
-                    "your status update. Please we request you to update departed, arrived or started in ServiceNow.",
+                    "your status update. Please we request you to update departed, arrived or started in NexTask.",
         "ack": "Thank you. Your acknowledgement has been recorded. Goodbye.",
         "reject": "Your rejection has been recorded. The ticket will be escalated. Goodbye.",
         "reject_reason_prompt": "Please select a reason for declining. Press 1 if you are busy on another site. Press 2 if you are on leave. Press 3 if you have an equipment or vehicle issue. Press 4 for other reasons.",

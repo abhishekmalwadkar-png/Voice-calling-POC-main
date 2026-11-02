@@ -221,7 +221,10 @@ def save_alert_intake(payload):
 
                 event_id = item.get("event_id") or f"EVT-{int(datetime.now().timestamp()*1000)}"
                 event_type = item.get("event_type") or "ASSIGNMENT_CREATED"
-                event_version = item.get("event_version") or 1
+                try:
+                    event_version = int(float(str(item.get("event_version", "1"))))
+                except Exception:
+                    event_version = 1
                 event_ts = item.get("event_timestamp") or batch_ts or now_iso
                 alert_id = item.get("alert_id")
 
@@ -256,7 +259,7 @@ def save_alert_intake(payload):
                 ack = item.get("acknowledgement") if isinstance(item.get("acknowledgement"), dict) else {}
                 dtmf_digit = str(ack.get("dtmf_digit") or item.get("ack_digit") or "1")
 
-                # 1. Insert into tb_nextask_events
+                # 1. Insert into tb_nextask_events (Event ID, event type, event version, event timestamp, batch ID, payload JSON)
                 cur.execute("""
                     INSERT INTO public.tb_nextask_events (
                         batch_id, event_id, ticket_id, assignment_id, event_type,
@@ -267,15 +270,15 @@ def save_alert_intake(payload):
                     event_version, event_ts, Json(item), "Received"
                 ))
 
-                # 2. Upsert into tb_tickets
+                # 2. Insert/Upsert into tb_tickets (Ticket ID, Alert ID, Alarm ID, branch/site details, issue description, severity, ticket status, alarm status)
                 cur.execute("""
                     INSERT INTO public.tb_tickets (
                         ticket_id, alarm_id, alert_id, branch_id, branch_name,
                         site_number, site_name, issue_description, alarm_type,
-                        severity, ticket_status, alarm_status, current_assignment_id,
+                        severity, ticket_status, alarm_status,
                         opened_at, last_event_version, last_event_at, updated_at
                     ) VALUES (
-                        %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, now()
+                        %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, now()
                     )
                     ON CONFLICT (ticket_id) DO UPDATE SET
                         alarm_id = EXCLUDED.alarm_id,
@@ -289,18 +292,17 @@ def save_alert_intake(payload):
                         severity = EXCLUDED.severity,
                         ticket_status = EXCLUDED.ticket_status,
                         alarm_status = EXCLUDED.alarm_status,
-                        current_assignment_id = EXCLUDED.current_assignment_id,
                         last_event_version = EXCLUDED.last_event_version,
                         last_event_at = EXCLUDED.last_event_at,
                         updated_at = now();
                 """, (
                     ticket_id, alarm_id, alert_id, branch_id, branch_name,
                     site_number, site_name, issue_desc, alarm_type,
-                    severity, ticket_status, alarm_status, assignment_id,
+                    severity, ticket_status, alarm_status,
                     event_ts, event_version, event_ts
                 ))
 
-                # 3. Upsert into tb_assignments
+                # 3. Insert/Upsert into tb_assignments (Assignment ID, assignment type, technician details, Team Leader and Manager details, DTMF digit, assignment timestamp)
                 cur.execute("""
                     INSERT INTO public.tb_assignments (
                         assignment_id, ticket_id, previous_assignment_id,
@@ -328,7 +330,7 @@ def save_alert_intake(payload):
                     dtmf_digit, assignment_type, "Assigned", assigned_at
                 ))
 
-                # 4. Insert into tb_audit_logs
+                # 4. Insert into tb_audit_logs (Event received, validation result, ticket creation, assignment creation)
                 cur.execute("""
                     INSERT INTO public.tb_audit_logs (
                         ticket_id, assignment_id, event_id, activity_type,
@@ -336,9 +338,23 @@ def save_alert_intake(payload):
                     ) VALUES (%s, %s, %s, %s, %s, %s, %s)
                 """, (
                     ticket_id, assignment_id, event_id, "ALERT_INGESTED",
-                    f"Alert ingested via API for {ticket_id} (batch: {batch_id or '-'})",
-                    "SUCCESS", Json({"batch_id": batch_id, "event_type": event_type, "severity": severity})
+                    f"Event received & validated for ticket {ticket_id}, assignment {assignment_id} created",
+                    "SUCCESS", Json({
+                        "batch_id": batch_id,
+                        "event_type": event_type,
+                        "severity": severity,
+                        "validation": "PASSED",
+                        "ticket_created": True,
+                        "assignment_created": True
+                    })
                 ))
+
+                # 5. UPDATE tb_tickets: Set current_assignment_id after inserting the assignment
+                cur.execute("""
+                    UPDATE public.tb_tickets
+                    SET current_assignment_id = %s, updated_at = now()
+                    WHERE ticket_id = %s;
+                """, (assignment_id, ticket_id))
 
         conn.commit()
         return True
@@ -393,3 +409,4 @@ def save_voice_call_record(call_dict):
         return False
     finally:
         release_connection(conn)
+
