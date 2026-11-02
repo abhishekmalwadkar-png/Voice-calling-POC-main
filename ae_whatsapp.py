@@ -1,5 +1,7 @@
-"""AutomationEdge WhatsApp push notification client.
-Uses AE_AUTH_SECRET from .env to generate dynamic Bearer tokens on demand.
+"""360dialog WhatsApp API client.
+Sends outbound WhatsApp messages using 360dialog Cloud API.
+API: https://waba-v2.360dialog.io/messages
+Header: D360-API-KEY
 """
 import json
 import urllib.error
@@ -7,28 +9,14 @@ import urllib.request
 
 from config import CFG
 
-
-def get_token(timeout=10):
-    """Fetch a fresh dynamic JWT Bearer token from AutomationEdge using AE_AUTH_SECRET."""
-    secret = CFG.get("ae_auth_secret") or "AistudioQA"
-    url = CFG.get("ae_auth_url") or "https://dev-p187.ac2.automationedge.com/authenticate"
-    req = urllib.request.Request(
-        url,
-        headers={"Authorization": f"Bearer {secret}"},
-        method="POST"
-    )
-    with urllib.request.urlopen(req, timeout=timeout) as resp:
-        return resp.read().decode("utf-8").strip()
+DEFAULT_360_API_KEY = "xCyHUYyCA24Dq6iWgISlP8hdAK"
+DEFAULT_360_URL = "https://waba-v2.360dialog.io/messages"
 
 
 def send_whatsapp(phone_number, message, timeout=15):
-    """Send a WhatsApp message to a phone number using AutomationEdge Push Notifications API."""
-    token = get_token()
-    push_url = CFG.get("ae_push_url") or "https://dev-p187.ac2.automationedge.com/api/push-notifications"
-    bot_id = CFG.get("ae_bot_id") or "104650799293101"
-    service_url = CFG.get("ae_service_url") or "http://localhost:3978/whatsapp"
-    if "automationedge.com" in service_url:
-        service_url = "http://localhost:3978/whatsapp"
+    """Send a WhatsApp text message to a phone number using 360dialog API."""
+    api_key = CFG.get("d360_api_key") or DEFAULT_360_API_KEY
+    url = CFG.get("d360_api_url") or DEFAULT_360_URL
 
     clean_number = "".join(str(phone_number).split()).lstrip("+")
     if len(clean_number) == 10:
@@ -37,29 +25,22 @@ def send_whatsapp(phone_number, message, timeout=15):
     clean_message = str(message).replace("\\n", "\n").replace("\r\n", "\n")
 
     payload = {
-        "additionalInfo": {
-            "auth_header": f"Bearer {token}"
-        },
-        "notifications": [
-            {
-                "bot_id": str(bot_id),
-                "chat_channel": "whatsapp",
-                "user_id": clean_number,
-                "service_url": service_url,
-                "trigger_aistudio_dialog": {
-                    "dialog_id": "notification",
-                    "params": {
-                        "message": clean_message
-                    }
-                }
-            }
-        ]
+        "messaging_product": "whatsapp",
+        "recipient_type": "individual",
+        "to": clean_number,
+        "type": "text",
+        "text": {
+            "body": clean_message
+        }
     }
 
     req = urllib.request.Request(
-        push_url,
+        url,
         data=json.dumps(payload).encode("utf-8"),
-        headers={"Content-Type": "application/json"},
+        headers={
+            "Content-Type": "application/json",
+            "D360-API-KEY": api_key
+        },
         method="POST"
     )
     with urllib.request.urlopen(req, timeout=timeout) as resp:
@@ -69,7 +50,7 @@ def send_whatsapp(phone_number, message, timeout=15):
 if __name__ == "__main__":
     import sys
     target = sys.argv[1] if len(sys.argv) > 1 else "7709890643"
-    msg = sys.argv[2] if len(sys.argv) > 2 else "Test notification from ae_whatsapp module using .env"
-    print(f"Generating token and sending WhatsApp message to {target}...")
+    msg = sys.argv[2] if len(sys.argv) > 2 else "Test message from 360dialog WhatsApp client"
+    print(f"Sending WhatsApp message to {target} via 360dialog...")
     status, body = send_whatsapp(target, msg)
     print(f"Status: {status}, Response: {body}")

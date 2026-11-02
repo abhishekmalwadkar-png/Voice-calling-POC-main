@@ -437,9 +437,7 @@ def _escalate(t, reason, tech_calls):
                 note = f"Technician: {tech_name} (Declined - Reason: {rej_r})" if rej_r else f"Technician: {tech_name} (Rejected assignment)"
             else:
                 note = f"Technician: {tech_name} (Did not answer after {tech_calls} call attempts)"
-            # [WHATSAPP_DISABLED] Uncomment to re-enable WhatsApp on escalation
-            # send_whatsapp_alert(t, role, rec_role, alert_type_override="Emergency Escalation" if _is_emergency_ticket(t) else "Escalation", custom_note=note)
-            pass
+            send_whatsapp_alert(t, role, rec_role, alert_type_override="Emergency Escalation" if _is_emergency_ticket(t) else "Escalation", custom_note=note)
 
     if r.get("team_leader", {}).get("mobile"):
         return [f"escalation started ({reason})", _schedule(tid, t["assignment_id"], "tl_call", 1, 0)]
@@ -521,10 +519,8 @@ def _place_call(t, role, attempt, workflow, send_wa=True):
              template, version, now_iso()))
     is_emergency = (str(t.get("severity") or "").lower() == "emergency" or
                     str(t.get("uc1_state") or "") == "EMERGENCY_TRIGGERED")
-    # [WHATSAPP_DISABLED] Uncomment to re-enable WhatsApp alert on call placement
-    # if send_wa and not is_emergency and role in ("team_leader", "manager") and rec.get("mobile"):
-    #     send_whatsapp_alert(t, role, rec, call_cid=cid)
-    pass
+    if send_wa and not is_emergency and role in ("team_leader", "manager") and rec.get("mobile"):
+        send_whatsapp_alert(t, role, rec, call_cid=cid)
 
     try:
         if not rec.get("mobile"):
@@ -542,9 +538,6 @@ def _place_call(t, role, attempt, workflow, send_wa=True):
 
 def send_whatsapp_alert(t, role, rec, call_cid=None, alert_type_override=None, custom_note=None, delay_sec=None):
     """Send WhatsApp alert to Team Leader or Manager."""
-    # [WHATSAPP_DISABLED] WhatsApp notifications are temporarily commented out.
-    # To re-enable, remove the return below.
-    return
     if not rec or not rec.get("mobile"):
         return
     tid = t["ticket_id"]
@@ -592,9 +585,6 @@ def send_whatsapp_alert(t, role, rec, call_cid=None, alert_type_override=None, c
 
 def send_whatsapp_closure(t, role, rec, resolution=None, closed_at=None, delay_sec=None):
     """Send Emergency Closure WhatsApp notification to Team Leader, Manager, or Technician."""
-    # [WHATSAPP_DISABLED] WhatsApp notifications are temporarily commented out.
-    # To re-enable, remove the return below.
-    return
     if not rec or not rec.get("mobile"):
         return
     tid = t["ticket_id"]
