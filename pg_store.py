@@ -311,7 +311,16 @@ def save_alert_intake(payload):
                     event_version, event_ts, Json(item), "Received"
                 ))
 
-                # 3. Insert/Upsert into tb_assignments (Assignment ID, assignment type, technician details, Team Leader and Manager details, DTMF digit, assignment timestamp)
+                # 3. Ensure previous_assignment_id exists to satisfy FK constraint tb_assignments_previous_assignment_id_fkey
+                if prev_assignment_id:
+                    cur.execute("""
+                        INSERT INTO public.tb_assignments (
+                            assignment_id, ticket_id, assignment_type, assignment_status, assigned_at
+                        ) VALUES (%s, %s, 'INITIAL', 'Replaced', %s)
+                        ON CONFLICT (assignment_id) DO NOTHING;
+                    """, (prev_assignment_id, ticket_id, assigned_at))
+
+                # Insert/Upsert into tb_assignments (Assignment ID, assignment type, technician details, Team Leader and Manager details, DTMF digit, assignment timestamp)
                 cur.execute("""
                     INSERT INTO public.tb_assignments (
                         assignment_id, ticket_id, previous_assignment_id,
