@@ -21,7 +21,8 @@ from store import (audit, epoch, get_call, get_ticket, iso_at, now_iso, parse_ti
                    update_call, update_ticket)
 
 EVENT_TYPES = {
-    "ASSIGNMENT_CREATED", "REASSIGNED", "ASSIGNMENT_ACCEPTED", "ASSIGNMENT_REJECTED",
+    "ASSIGNMENT_CREATED", "ASSIGNMENT_INITIAL", "REASSIGNED", "ASSIGNMENT_REASSIGNED",
+    "ASSIGNMENT_ACCEPTED", "ASSIGNMENT_REJECTED",
     "OPERATIONAL_STATUS", "ALARM_STATUS", "TICKET_CREATED", "TICKET_UPDATED", "SEVERITY_CHANGED", "TICKET_CLOSED",
 }
 TICKET_FIELDS = ("ticket_id", "alert_id", "alarm_id", "assignment_id", "site_number", "site_name", "severity", "status", "region", "country_code",
@@ -126,7 +127,7 @@ def normalize_event(p):
         recipients[role] = {"name": str(r.get("name") or "").strip(), "mobile": mobile, "language": lang,
                             "id": str(r.get("id") or r.get(f"{role}_id") or "").strip()}
 
-    if ev["event_type"] in ("ASSIGNMENT_CREATED", "REASSIGNED"):
+    if ev["event_type"] in ("ASSIGNMENT_CREATED", "ASSIGNMENT_INITIAL", "REASSIGNED", "ASSIGNMENT_REASSIGNED"):
         if not fields.get("assignment_id"):
             raise EventError(f"{ev['event_type']} needs ticket.assignment_id")
         if not recipients.get("technician", {}).get("mobile"):
@@ -230,7 +231,7 @@ def _dispatch(t, previous, ev):
             return _stop_all(t, "CANCELLED_ALARM_CLEARED", "STOPPED_ALARM_CLEARED", "alarm cleared")
         return [f"alarm status {t['alarm_status']} recorded"]
 
-    if kind == "ASSIGNMENT_CREATED":
+    if kind in ("ASSIGNMENT_CREATED", "ASSIGNMENT_INITIAL"):
         if t["uc1_assignment_id"] == t["assignment_id"] and t["uc1_state"] and \
                 not t["uc1_state"].startswith("CANCELLED"):
             audit(tid, "assignment_duplicate", f"Assignment {t['assignment_id']} already handled - suppressed")
@@ -240,7 +241,7 @@ def _dispatch(t, previous, ev):
             actions += _stop_all(t, "CANCELLED_REASSIGNED", "STOPPED_REASSIGNED", "new assignment")
         return actions + _start_uc1(get_ticket(tid))
 
-    if kind == "REASSIGNED":
+    if kind in ("REASSIGNED", "ASSIGNMENT_REASSIGNED"):
         actions = _stop_all(t, "CANCELLED_REASSIGNED", "STOPPED_REASSIGNED",
                             f"reassigned from {previous['assignment_id'] if previous else '-'}")
         return actions + _start_uc1(get_ticket(tid))
@@ -1473,7 +1474,7 @@ def normalize_intake_alert(item):
 
     event = {
         "event_id": str(_get("event_id", default=f"INTAKE-{ticket_id}-{stamp}")).strip(),
-        "event_type": ("REASSIGNED" if str(_get("event_type", default="ASSIGNMENT_CREATED")).strip().upper() in ("ASSIGNMENT_REASSIGNED", "REASSIGN", "REASSIGNMENT") else str(_get("event_type", default="ASSIGNMENT_CREATED")).strip().upper()),
+        "event_type": ("REASSIGNED" if str(_get("event_type", default="ASSIGNMENT_CREATED")).strip().upper() in ("ASSIGNMENT_REASSIGNED", "REASSIGN", "REASSIGNMENT") else ("ASSIGNMENT_CREATED" if str(_get("event_type", default="ASSIGNMENT_CREATED")).strip().upper() in ("ASSIGNMENT_INITIAL", "INITIAL", "ASSIGNMENT_CREATE") else str(_get("event_type", default="ASSIGNMENT_CREATED")).strip().upper())),
         "event_time": date_time,
         "version": version,
         "ack_digit": ack_digit,
