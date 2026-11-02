@@ -291,12 +291,21 @@ def save_alert_intake(payload):
                     event_ts, event_version, event_ts
                 ))
 
-                # 2. Insert into tb_nextask_events (Event ID, event type, event version, event timestamp, batch ID, payload JSON)
+                # 2. Upsert into tb_nextask_events (Event ID is unique; update payload if same event_id arrives)
                 cur.execute("""
                     INSERT INTO public.tb_nextask_events (
                         batch_id, event_id, ticket_id, assignment_id, event_type,
                         event_version, event_timestamp, payload_json, processing_status
                     ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    ON CONFLICT (event_id) DO UPDATE SET
+                        batch_id = EXCLUDED.batch_id,
+                        ticket_id = EXCLUDED.ticket_id,
+                        assignment_id = EXCLUDED.assignment_id,
+                        event_type = EXCLUDED.event_type,
+                        event_version = EXCLUDED.event_version,
+                        event_timestamp = EXCLUDED.event_timestamp,
+                        payload_json = EXCLUDED.payload_json,
+                        received_at = now();
                 """, (
                     batch_id, event_id, ticket_id, assignment_id, event_type,
                     event_version, event_ts, Json(item), "Received"
