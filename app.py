@@ -2342,6 +2342,8 @@ class Handler(BaseHTTPRequestHandler):
         self._send(code, json.dumps(obj, indent=2, ensure_ascii=False), "application/json; charset=utf-8")
 
     def _parse(self):
+        if hasattr(self, "_parsed"):
+            return self._parsed
         url = urllib.parse.urlparse(self.path)
         params = {k: v[0] for k, v in urllib.parse.parse_qs(url.query).items()}
         length = int(self.headers.get("Content-Length") or 0)
@@ -2352,7 +2354,8 @@ class Handler(BaseHTTPRequestHandler):
                 form = json.loads(raw) if raw else {}
             except json.JSONDecodeError:
                 form = None
-        return url.path.rstrip("/") or "/", params, form
+        self._parsed = (url.path.rstrip("/") or "/", params, form)
+        return self._parsed
 
     def _from_this_pc(self):
         """True only for requests made on this PC (not via the tunnel, not from another machine)."""
