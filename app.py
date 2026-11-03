@@ -181,8 +181,8 @@ def legacy_call(form):
 
 def emergency_call(form):
     """POST /api/emergency_api or /api/emergency
-    Triggers emergency voice call to technician,
-    and sends WhatsApp alert messages to team leader and manager.
+    Triggers emergency alert: sends WhatsApp alert messages to technician and team leader
+    (no voice calls).
     Accepts flat fields or nested event format.
     """
     if not isinstance(form, dict):

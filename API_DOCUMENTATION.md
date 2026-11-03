@@ -178,8 +178,8 @@ Ingests a single ticket or an entire batch of network/power/HVAC alerts, creates
   "alerts": [
     {
       "event_id": "EVT001",
-      "event_type": "ASSIGNMENT_REASSIGNED",
-      "event_version": 2,
+      "event_type": "ASSIGNMENT_CREATED",
+      "event_version": 1,
       "alert_id": "ALT1001",
       "ticket": {
         "ticket_id": "INC1001",
@@ -191,31 +191,27 @@ Ingests a single ticket or an entire batch of network/power/HVAC alerts, creates
         "alarm_status": "Active"
       },
       "assignment": {
-        "assignment_id": "ASN002",
-        "assignment_type": "REASSIGNMENT",
-        "previous_assignment_id": "ASN001",
+        "assignment_id": "ASN001",
+        "assignment_type": "INITIAL",
         "assigned_at": "2026-10-30T10:30:00+03:00"
       },
       "technician": {
-        "technician_id": "ENG002",
+        "technician_id": "ENG001",
         "name": "Ali",
-        "mobile_number": "+9665XXXXXXXX",
+        "mobile_number": "+966501234567",
         "preferred_language": "English"
       },
       "team_leader": {
         "team_leader_id": "TL001",
         "name": "Mohammed",
-        "mobile_number": "+9665XXXXXXXX",
+        "mobile_number": "+966501234568",
         "preferred_language": "English"
       },
       "manager": {
         "manager_id": "MGR001",
         "name": "Khalid",
-        "mobile_number": "+9665XXXXXXXX",
+        "mobile_number": "+966501234569",
         "preferred_language": "English"
-      },
-      "acknowledgement": {
-        "dtmf_digit": "1"
       }
     }
   ]
@@ -319,9 +315,8 @@ Comparison between previous fields and current gateway payload fields, along wit
 | **Assign** | *(none)* | `assignment.previous_assignment_id` | `VARCHAR(50)` | `null` / `ASN001` | Prior assignment reference |
 | **Assign** | *(none)* | `assignment.assigned_at` | `TIMESTAMPTZ` | `2026-10-30T10:20:00+03:00` | Record assignment time |
 | **Contact** | `technician_name` | `technician.name` | `VARCHAR(150)` | `Ali` | Field engineer name |
-| **Contact** | `technician_mobile` | `technician.mobile_number` | `VARCHAR(30)` | `+9665XXXXXXXX` | Technician phone number |
+| **Contact** | `technician_mobile` | `technician.mobile_number` | `VARCHAR(30)` | `+966501234567` | Technician phone number (E.164 format) |
 | **Contact** | *(none)* | `technician.preferred_language` | `VARCHAR(20)` | `English` / `Arabic` | Voice audio language |
-| **DTMF** | `ack_digit` | `acknowledgement.dtmf_digit` | `VARCHAR(10)` | `1` | Key to acknowledge call |
 
 > [!NOTE]
 > Additional ticket context attributes (`ticket.issue_description`, `ticket.severity`, `ticket.alarm_type`) and escalation contacts (`team_leader`, `manager`) remain fully supported in the JSON payload and database columns (`tb_tickets`, `tb_assignments`).
