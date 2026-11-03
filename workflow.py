@@ -97,13 +97,12 @@ def normalize_event(p):
         ev["version"] = int(p["version"]) if p.get("version") not in (None, "") else None
     except (TypeError, ValueError):
         raise EventError("version must be an integer") from None
-    ev["ack_digit"] = _digit(p.get("ack_digit"), "ack_digit")
-    ev["reject_digit"] = _digit(p.get("reject_digit"), "reject_digit")
-    ev["callback_url"] = str(p.get("callback_url") or "").strip() or None
+    nested = p.get("ticket") if isinstance(p.get("ticket"), dict) else {}
+    ev["ack_digit"] = _digit(p.get("ack_digit") or nested.get("ack_digit"), "ack_digit")
+    ev["reject_digit"] = _digit(p.get("reject_digit") or nested.get("reject_digit"), "reject_digit")
+    ev["callback_url"] = str(p.get("callback_url") or nested.get("callback_url") or "").strip() or None
     if ev["callback_url"] and not re.match(r"https?://[^\s/]+", ev["callback_url"]):
         raise EventError("callback_url must start with http:// or https://")
-
-    nested = p.get("ticket") if isinstance(p.get("ticket"), dict) else {}
     fields = {k: nested.get(k, p.get(k)) for k in TICKET_FIELDS}
     fields = {k: str(v).strip() for k, v in fields.items() if v not in (None, "")}
     if not fields.get("ticket_id"):
