@@ -2097,10 +2097,10 @@ def handle_push_records(payload):
                     event_id, ticket_id, event_type, version, event_time,
                     received_at, result, note, payload
                 ) VALUES (?,?,?,?,?,?,?,?,?)""",
-                  (evt_id, tid, "RECORD_PUSHED", 1, created_date,
-                   current_time, "stored", f"Pushed record for {tid}", json.dumps(item, ensure_ascii=False)))
+                  (evt_id, tid, "ALERT_INGESTED", 1, created_date,
+                   current_time, "stored", f"New alert ingested for ticket {tid}", json.dumps(item, ensure_ascii=False)))
 
-                audit(tid, "record_pushed", f"Ticket {tid} ({issue_desc}) stored via /api/pushrecords", event_id=evt_id)
+                audit(tid, "alert_ingested", f"New alert ingested: Ticket {tid} ({issue_desc})", event_id=evt_id)
 
             success_count += 1
             valid_items.append(item)

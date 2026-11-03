@@ -584,7 +584,7 @@ def save_pushed_records(items):
                     INSERT INTO public.tb_nextask_events (
                         event_id, ticket_id, assignment_id, event_type,
                         event_version, event_timestamp, payload_json, processing_status
-                    ) VALUES (%s, %s, %s, 'RECORD_PUSHED', 1, %s, %s, 'STORED')
+                    ) VALUES (%s, %s, %s, 'ALERT_INGESTED', 1, %s, %s, 'STORED')
                     ON CONFLICT (event_id) DO NOTHING;
                 """, (evt_id, tid, aid, created_date, Json(item)))
 
@@ -593,8 +593,8 @@ def save_pushed_records(items):
                     INSERT INTO public.tb_audit_logs (
                         ticket_id, assignment_id, event_id, activity_type,
                         activity_description, activity_status, details_json
-                    ) VALUES (%s, %s, %s, 'RECORD_PUSHED', %s, 'SUCCESS', %s);
-                """, (tid, aid, evt_id, f"Ticket {tid} pushed via /api/pushrecords", Json(item)))
+                    ) VALUES (%s, %s, %s, 'ALERT_INGESTED', %s, 'SUCCESS', %s);
+                """, (tid, aid, evt_id, f"New alert ingested for ticket {tid}", Json(item)))
 
         conn.commit()
         return True
