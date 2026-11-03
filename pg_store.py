@@ -260,6 +260,7 @@ def save_alert_intake(payload):
                 severity = ticket_data.get("severity") or item.get("severity") or "Normal"
                 ticket_status = ticket_data.get("ticket_status") or item.get("ticket_status") or "Assigned"
                 alarm_status = ticket_data.get("alarm_status") or item.get("alarm_status") or "Active"
+                operational_status = ticket_data.get("operational_status") or item.get("operational_status")
                 site_name = branch_name or ticket_data.get("site_name") or item.get("site_details")
 
                 assignment = item.get("assignment") if isinstance(item.get("assignment"), dict) else {}
@@ -285,10 +286,10 @@ def save_alert_intake(payload):
                     INSERT INTO public.tb_tickets (
                         ticket_id, alarm_id, alert_id, branch_id, branch_name,
                         site_number, site_name, issue_description, alarm_type,
-                        severity, ticket_status, alarm_status,
+                        severity, ticket_status, alarm_status, operational_status,
                         opened_at, last_event_version, last_event_at, updated_at
                     ) VALUES (
-                        %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, now()
+                        %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, now()
                     )
                     ON CONFLICT (ticket_id) DO UPDATE SET
                         alarm_id = EXCLUDED.alarm_id,
@@ -302,13 +303,14 @@ def save_alert_intake(payload):
                         severity = EXCLUDED.severity,
                         ticket_status = EXCLUDED.ticket_status,
                         alarm_status = EXCLUDED.alarm_status,
+                        operational_status = COALESCE(EXCLUDED.operational_status, public.tb_tickets.operational_status),
                         last_event_version = EXCLUDED.last_event_version,
                         last_event_at = EXCLUDED.last_event_at,
                         updated_at = now();
                 """, (
                     ticket_id, alarm_id, alert_id, branch_id, branch_name,
                     site_number, site_name, issue_desc, alarm_type,
-                    severity, ticket_status, alarm_status,
+                    severity, ticket_status, alarm_status, operational_status,
                     event_ts, event_version, event_ts
                 ))
 

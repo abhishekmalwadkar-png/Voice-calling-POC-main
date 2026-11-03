@@ -1419,9 +1419,10 @@ def normalize_intake_alert(item):
     if country_code and not country_code.startswith("+"):
         country_code = "+" + country_code
 
-    # 14. Alert Status & Ticket Status
+    # 14. Alert Status, Ticket Status & Operational Status
     alert_status = str(_get("alert_status", "alarm_status", "status", "ticket_status", default="Active")).strip()
     ticket_status = str(_get("ticket_status", "status", "alert_status", default="Assigned")).strip()
+    operational_status = str(_get("operational_status", "op_status", default="")).strip() or None
 
     # 12. Date & Time
     date_time = str(_get("date_time", "event_timestamp", "timestamp", "assigned_at", "date_and_time", "event_time", "created_at",
@@ -1550,6 +1551,7 @@ def normalize_intake_alert(item):
             "severity": severity,
             "status": ticket_status,
             "alarm_status": alert_status,
+            "operational_status": operational_status,
             "description": description
         },
         "recipients": recipients
@@ -1578,6 +1580,7 @@ def normalize_intake_alert(item):
         "date_time": date_time,
         "country_code": country_code,
         "alert_status": alert_status,
+        "operational_status": operational_status,
         "ack_digit": ack_digit,
         "recipients": {r["role"]: r for r in recipients}
     }
