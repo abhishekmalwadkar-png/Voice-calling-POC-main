@@ -130,6 +130,9 @@ def _keep_v1_tables():
 
 def q(sql, args=(), one=False):
     """Run one statement. INSERT returns the new row id, UPDATE/DELETE the affected row count."""
+    global _conn
+    if _conn is None:
+        connect()
     with DB_LOCK:
         cur = _conn.execute(sql, args)
         head = sql.lstrip()[:6].upper()

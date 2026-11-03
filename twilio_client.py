@@ -59,6 +59,19 @@ def end_call(call_sid, current_status):
     _request("POST", f"Calls/{call_sid}.json", {"Status": status})
 
 
+def send_sms(to_number, body):
+    """Send an outbound SMS message via Twilio."""
+    params = {
+        "To": to_number,
+        "From": CFG["from"],
+        "Body": body,
+    }
+    if CFG["dry_run"]:
+        DRY_RUN_LOG.append(("send_sms", params))
+        return f"DRYSM{next(_dry_ids):06d}"
+    return _request("POST", "Messages.json", params)["sid"]
+
+
 def signature_for(url, params):
     """X-Twilio-Signature: base64(HMAC-SHA1(auth token, url + sorted POST key/values))."""
     payload = url + "".join(f"{k}{params[k]}" for k in sorted(params))

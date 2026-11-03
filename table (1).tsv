@@ -1,0 +1,19 @@
+Field	Push API	Update API
+task_id	Required	Required
+issue_description	Required	—
+issue_type	Required	—
+severity	Required	Optional
+task_status	Required	Optional
+alarm_status	Required	Optional
+site_number	Required	—
+created_date	Required	—
+technician_name	Required	Required for reassignment
+technician_mobile	Required	Required for reassignment
+technician_preferred_lang	Required	Required for reassignment
+teamleader_name	Required	Optional for reassignment
+teamleader_mobile	Required	Optional for reassignment
+teamleader_preferred_lang	Required	Optional for reassignment
+manager_name	Required	Optional for reassignment
+manager_mobile	Required	Optional for reassignment
+manager_preferred_lang	Required	Optional for reassignment
+update_type	—	Required

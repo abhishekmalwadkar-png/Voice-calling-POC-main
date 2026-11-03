@@ -57,12 +57,65 @@ def search_calls(params):
 
 
 def timeline(ticket_id):
-    """Every event, timer, call status, key press and decision for one ticket, oldest first."""
-    rows = q("SELECT ts, kind, message, call_id, event_id, data FROM audit_log WHERE ticket_id=? ORDER BY id",
-             (ticket_id,))
+    """Chronological timeline of received events, attempts, DTMF results, messages, timers, state checks and escalations."""
+    items = []
+    # 1. Audit logs
+    rows = q("SELECT ts, kind, message, call_id, event_id, data FROM audit_log WHERE ticket_id=? ORDER BY id", (ticket_id,))
     for r in rows:
-        r["data"] = json.loads(r["data"]) if r["data"] else None
-    return rows
+        items.append({
+            "timestamp": r["ts"],
+            "category": r["kind"],
+            "description": r["message"],
+            "call_id": r["call_id"],
+            "event_id": r["event_id"],
+            "data": json.loads(r["data"]) if r["data"] else None,
+            "source": "audit"
+        })
+    # 2. Voice Calls
+    calls = q("SELECT * FROM calls WHERE ticket_id=? ORDER BY id", (ticket_id,))
+    for c in calls:
+        if c.get("created_at") or c.get("initiated_at"):
+            items.append({
+                "timestamp": c.get("initiated_at") or c.get("created_at") or "",
+                "category": "call_initiated",
+                "description": f"Voice call initiated to {c.get('role', 'Technician').capitalize()} ({c.get('to_number')}) - Attempt #{c.get('attempt_no', 1)}",
+                "call_sid": c.get("call_sid"),
+                "event_id": None,
+                "source": "voice"
+            })
+        if c.get("answered_at"):
+            items.append({
+                "timestamp": c.get("answered_at"),
+                "category": "call_answered",
+                "description": f"Call answered by {c.get('recipient_name') or c.get('role', 'Technician').capitalize()} ({c.get('to_number')})",
+                "call_sid": c.get("call_sid"),
+                "source": "voice"
+            })
+        if c.get("dtmf"):
+            items.append({
+                "timestamp": c.get("ended_at") or c.get("answered_at") or "",
+                "category": "dtmf_captured",
+                "description": f"DTMF Key pressed: '{c.get('dtmf')}' - Result: {c.get('ack_result') or 'recorded'} ({c.get('response') or 'completed'})",
+                "call_sid": c.get("call_sid"),
+                "source": "voice"
+            })
+    # 3. WhatsApp messages
+    try:
+        wams = q("SELECT * FROM whatsapp_messages WHERE ticket_id=? ORDER BY id", (ticket_id,))
+        for w in wams:
+            items.append({
+                "timestamp": w.get("sent_at") or w.get("submitted_at") or "",
+                "category": "whatsapp_dispatched",
+                "description": f"WhatsApp {w.get('message_type', 'Notification')} dispatched to {w.get('recipient_role', 'Recipient').capitalize()} ({w.get('mobile_number')}) via template '{w.get('template_name')}'",
+                "provider_message_id": w.get("provider_message_id"),
+                "status": w.get("delivery_status"),
+                "source": "whatsapp"
+            })
+    except Exception:
+        pass
+    
+    items.sort(key=lambda x: str(x.get("timestamp") or ""))
+    return items
 
 
 def escalations(params):
@@ -130,8 +183,40 @@ def export(params):
     elif kind == "calls":
         cols, rows = CALL_COLUMNS, q(f"SELECT {', '.join(CALL_COLUMNS)} FROM calls WHERE created_at BETWEEN ? AND ? "
                                      "ORDER BY id", (frm, to))
+    elif kind in ("evidence", "audit_evidence"):
+        cols = [
+            "ticket_id", "alert_id", "assignment_id", "site_number", "site_name", "severity",
+            "operational_status", "channel", "recipient_role", "recipient_name", "to_number",
+            "provider_identifier", "status", "dtmf_key", "outcome_response", "duration_sec",
+            "event_timestamp", "completed_delivered_at"
+        ]
+        call_rows = q("""
+            SELECT 
+                c.ticket_id, t.alarm_id as alert_id, c.assignment_id, t.site_number, t.site_name, t.severity,
+                t.operational_status, 'voice_call' as channel, c.role as recipient_role, c.recipient_name, c.to_number,
+                c.call_sid as provider_identifier, c.status, c.dtmf as dtmf_key, c.response as outcome_response,
+                c.duration_sec, c.initiated_at as event_timestamp, c.ended_at as completed_delivered_at
+            FROM calls c
+            LEFT JOIN tickets t ON c.ticket_id = t.ticket_id
+            ORDER BY c.id DESC LIMIT 5000
+        """)
+        try:
+            wa_rows = q("""
+                SELECT 
+                    w.ticket_id, t.alarm_id as alert_id, w.assignment_id, t.site_number, t.site_name, t.severity,
+                    t.operational_status, 'whatsapp' as channel, w.recipient_role, w.recipient_name, w.mobile_number as to_number,
+                    w.provider_message_id as provider_identifier, w.delivery_status as status, '' as dtmf_key,
+                    w.template_name as outcome_response, 0 as duration_sec, w.submitted_at as event_timestamp,
+                    w.sent_at as completed_delivered_at
+                FROM whatsapp_messages w
+                LEFT JOIN tickets t ON w.ticket_id = t.ticket_id
+                ORDER BY w.id DESC LIMIT 5000
+            """)
+        except Exception:
+            wa_rows = []
+        rows = list(call_rows) + list(wa_rows)
     else:
-        raise ValueError("type must be calls, events or timeline")
+        raise ValueError("type must be calls, events, timeline or evidence")
     stamp = (params.get("from") or "all")[:10]
     if (params.get("format") or "csv").lower() == "json":
         return "application/json; charset=utf-8", json.dumps(rows, indent=2, ensure_ascii=False), \

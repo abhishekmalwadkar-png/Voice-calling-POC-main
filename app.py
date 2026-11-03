@@ -5,7 +5,7 @@ def docs_html():
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>NextAsk Gateway - API Documentation</title>
+  <title>NexTask Gateway - API Documentation</title>
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/github-markdown-css/5.5.0/github-markdown.min.css">
   <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
   <style>
@@ -344,7 +344,7 @@ def login_page_html(error_msg=None):
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Login · NextAsk Voice Platform</title>
+  <title>Login · NexTask Voice Platform</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
@@ -466,7 +466,7 @@ def login_page_html(error_msg=None):
 <body>
   <div class="login-card">
     <div class="logo-badge">⚡</div>
-    <h1>NextAsk Voice Platform</h1>
+    <h1>NexTask Voice Platform</h1>
     <p class="subtitle">Enter administrative credentials to access the portal</p>
 
     {err_html}
@@ -506,41 +506,91 @@ def safe_esc(val):
     return html.escape(str(val), quote=True)
 
 def dashboard_html():
-    tickets = queries.list_tickets({"limit": 50})
+    tickets = queries.list_tickets({"limit": 1000})
     total_tickets = len(tickets)
     ack_count = 0
-    calling_count = 0
+    assigned_count = 0
+    pending_count = 0
     escalated_count = 0
+    critical_count = 0
+    major_count = 0
+    normal_count = 0
+    unresolved_count = 0
+
+    try:
+        wa_row = store.q("SELECT COUNT(*) as cnt FROM whatsapp_messages", one=True)
+        wa_total = wa_row["cnt"] if wa_row else 0
+        wa_deliv_row = store.q("SELECT COUNT(*) as cnt FROM whatsapp_messages WHERE delivery_status IN ('delivered', 'read')", one=True)
+        wa_delivered = wa_deliv_row["cnt"] if wa_deliv_row else 0
+    except Exception:
+        wa_total = 0
+        wa_delivered = 0
+
+    try:
+        call_total_row = store.q("SELECT COUNT(*) as cnt FROM calls", one=True)
+        calls_total = call_total_row["cnt"] if call_total_row else 0
+        call_comp_row = store.q("SELECT COUNT(*) as cnt FROM calls WHERE status='completed'", one=True)
+        calls_completed = call_comp_row["cnt"] if call_comp_row else 0
+        call_fail_row = store.q("SELECT COUNT(*) as cnt FROM calls WHERE status IN ('failed', 'busy', 'no-answer') OR error_message IS NOT NULL", one=True)
+        calls_failed = call_fail_row["cnt"] if call_fail_row else 0
+    except Exception:
+        calls_total = 0
+        calls_completed = 0
+        calls_failed = 0
 
     cards = ""
     for v in tickets:
         cw = v.get("call_workflow") or {}
-        state = (cw.get("state") or "-").upper()
-        is_ack = v.get("acknowledged") or state in ("ACKNOWLEDGED", "TL_REACHED", "MANAGER_REACHED")
-        
-        has_active_call = any(c.get("status") in ("queued", "ringing", "in-progress") for c in v.get("calls", []))
-        is_calling = has_active_call or "CALL" in state
+        is_ack = v.get("acknowledged") or cw.get("acknowledged")
+        state = (cw.get("state") or "").upper()
 
         if is_ack:
             ack_count += 1
             filter_cat = "ack"
-            cls = "status-ok"
-            status_icon = "✓"
-        elif is_calling:
-            calling_count += 1
-            filter_cat = "calling"
-            cls = "status-calling"
-            status_icon = "●"
-        else:
+            cls = "status-ack"
+            status_text = "ACKNOWLEDGED"
+            is_unresolved = False
+        elif "ESCALAT" in state or "MANAGER" in state or "LEADER" in state:
             escalated_count += 1
+            unresolved_count += 1
             filter_cat = "escalated"
-            cls = "status-bad" if "UNRESOLVED" in state or "NO_CONTACTS" in state else "status-warn"
-            status_icon = "!"
+            cls = "status-escalated"
+            status_text = "ESCALATED"
+            is_unresolved = True
+        elif "CALL" in state or "PENDING" in state or (v.get("calls") and not is_ack):
+            pending_count += 1
+            filter_cat = "pending"
+            cls = "status-calling"
+            status_text = "PENDING / DIALING"
+            is_unresolved = False
+        else:
+            assigned_count += 1
+            filter_cat = "assigned"
+            cls = "status-assigned"
+            status_text = "ASSIGNED"
+            is_unresolved = False
 
         severity = str(v.get("severity") or "Normal").capitalize()
-        sev_cls = "sev-critical" if severity.lower() == "critical" else ("sev-major" if severity.lower() == "major" else "sev-normal")
+        sev_lower = severity.lower()
+        if sev_lower == "critical":
+            critical_count += 1
+            sev_cls = "sev-critical"
+        elif sev_lower == "major":
+            major_count += 1
+            sev_cls = "sev-major"
+        else:
+            normal_count += 1
+            sev_cls = "sev-normal"
 
+        op_status = v.get("operational_status")
+        op_badge = f'<span class="sub-badge op-badge">Movement: <b>{safe_esc(op_status)}</b></span>' if op_status else ""
+
+        all_call_sids = []
+        all_languages = []
+        all_outcomes = []
+        all_workflows = []
         calls_html = ""
+
         for c in v.get("calls", []):
             role_title = f"{safe_esc(c.get('role', 'Technician')).capitalize()} #{c.get('attempt_no', 1)}"
             c_status = safe_esc(c.get("status") or "unknown")
@@ -548,11 +598,29 @@ def dashboard_html():
             c_dtmf = safe_esc(str(c.get("dtmf") or "-"))
             c_resp = safe_esc(c.get("response") or "-")
             c_phone = safe_esc(c.get("to_number") or "")
+            c_sid = safe_esc(c.get("call_sid") or "")
+            c_outcome = safe_esc(c.get("outcome") or "")
+            c_wf = safe_esc(c.get("workflow") or "")
             superseded = " <span class='badge-superseded'>superseded</span>" if c.get("superseded") else ""
+
+            if c_sid:
+                all_call_sids.append(c_sid)
+            if c_lang and c_lang != "-":
+                all_languages.append(c_lang.lower())
+            if c_outcome:
+                all_outcomes.append(c_outcome.lower())
+            if c_wf:
+                all_workflows.append(c_wf.lower())
+
+            sid_pill = f"""<span class="corr-id" onclick="copyText('{c_sid}')" title="Click to copy Call SID">SID: {c_sid[:12]}...</span>""" if c_sid else ""
 
             calls_html += f"""
             <div class="call-row">
-              <div class="call-role"><span class="role-badge">{role_title}</span> <span class="phone-number">📞 {c_phone}</span></div>
+              <div class="call-role">
+                <span class="role-badge">{role_title}</span>
+                <span class="phone-number">{c_phone}</span>
+                {sid_pill}
+              </div>
               <div class="call-meta">
                 <span class="meta-tag">Status: <b>{c_status}</b></span>
                 <span class="meta-tag">Lang: <b>{c_lang}</b></span>
@@ -562,64 +630,146 @@ def dashboard_html():
               </div>
             </div>"""
 
+        wa_msgs = v.get("whatsapp_messages") or []
+        wa_html = ""
+        all_wamids = []
+        all_wa_statuses = []
+        if wa_msgs:
+            for w in wa_msgs:
+                w_role = safe_esc(w.get("recipient_role", "Recipient")).capitalize()
+                w_name = safe_esc(w.get("recipient_name") or "-")
+                w_tpl = safe_esc(w.get("template_name") or "-")
+                w_stat = safe_esc(w.get("delivery_status") or "sent")
+                w_time = safe_esc(w.get("sent_at") or w.get("submitted_at") or "-")
+                w_mid = safe_esc(w.get("provider_message_id") or "")
+
+                if w_mid:
+                    all_wamids.append(w_mid)
+                if w_stat:
+                    all_wa_statuses.append(w_stat.lower())
+
+                wamid_pill = f"""<span class="corr-id corr-id-wa" onclick="copyText('{w_mid}')" title="Click to copy WhatsApp ID">WAMID: {w_mid[:14]}...</span>""" if w_mid else ""
+
+                wa_html += f"""
+                <div class="wa-row">
+                  <div class="call-role">
+                    <span class="wa-badge" style="background:#e0e7ff;color:#3730a3;">SMS: {w_role}</span>
+                    <span class="phone-number">{safe_esc(w.get('mobile_number') or '')}</span>
+                    {wamid_pill}
+                  </div>
+                  <div class="call-meta">
+                    <span class="meta-tag">To: <b>{w_name}</b></span>
+                    <span class="meta-tag">Template: <b>{w_tpl}</b></span>
+                    <span class="meta-tag">Status: <b class="wa-status">{w_stat}</b></span>
+                    <span class="meta-tag">Time: <b>{w_time}</b></span>
+                  </div>
+                </div>"""
+
         time_str = safe_esc(v.get("last_event_time") or v.get("created_at") or "-")
-        search_blob = f"{safe_esc(v.get('ticket_id')).lower()} {safe_esc(v.get('site_name')).lower()} {safe_esc(v.get('site_number')).lower()} {safe_esc(v.get('alert_id')).lower()}"
+
+        recips = v.get("recipients") or {}
+        recip_names = " ".join(r.get("name", "") for r in recips.values() if isinstance(r, dict))
+        recip_phones = " ".join(r.get("mobile", "") for r in recips.values() if isinstance(r, dict))
+
+        search_blob = (
+            f"{safe_esc(v.get('ticket_id')).lower()} "
+            f"{safe_esc(v.get('alarm_id')).lower()} "
+            f"{safe_esc(v.get('alert_id')).lower()} "
+            f"{safe_esc(v.get('assignment_id')).lower()} "
+            f"{safe_esc(v.get('last_event_id')).lower()} "
+            f"{safe_esc(v.get('site_name')).lower()} "
+            f"{safe_esc(v.get('site_number')).lower()} "
+            f"{recip_names.lower()} {recip_phones} "
+            f"{' '.join(all_call_sids).lower()} "
+            f"{' '.join(all_wamids).lower()} "
+            f"{safe_esc(filter_cat)}"
+        )
+
+        lang_attr = " ".join(set(all_languages)) or "en"
+        outcome_attr = " ".join(set(all_outcomes)) or "none"
+        tid_str = str(v.get('ticket_id') or '').upper()
+        sev_str = str(v.get('severity') or '').lower()
+        desc_str = str(v.get('description') or '').lower()
+        if tid_str.startswith('EMG') or sev_str == 'emergency' or 'emergency' in desc_str:
+            all_workflows.append('emergency')
+        elif not all_workflows:
+            all_workflows.append('uc1_technician')
+
+        created_raw = str(v.get('created_at') or v.get('last_event_time') or '')
+        date_match = re.search(r'\d{4}[-/]\d{2}[-/]\d{2}', created_raw)
+        date_iso = date_match.group(0).replace('/', '-') if date_match else ''
+        wf_attr = " ".join(set(all_workflows))
+        wa_status_attr = " ".join(set(all_wa_statuses)) or "none"
 
         cards += f"""
-        <div class="ticket-card" data-category="{filter_cat}" data-search="{search_blob}">
+        <div class="ticket-card" 
+             data-category="{filter_cat}" 
+             data-date="{date_iso}"
+             data-lang="{lang_attr}"
+             data-outcome="{outcome_attr}"
+             data-wf="{wf_attr}"
+             data-ack="{'true' if is_ack else 'false'}"
+             data-unresolved="{'true' if is_unresolved else 'false'}"
+             data-wastatus="{wa_status_attr}"
+             data-search="{search_blob}">
           <div class="card-header">
             <div class="ticket-primary">
               <span class="ticket-id">{safe_esc(v.get('ticket_id') or 'INC000')}</span>
-              <span class="site-badge">🏢 {safe_esc(v.get('site_number'))} {safe_esc(v.get('site_name') or 'Main Site')}</span>
+              <span class="site-badge">Site {safe_esc(v.get('site_number') or '')} - {safe_esc(v.get('site_name') or 'Main Site')}</span>
               <span class="sev-badge {sev_cls}">{severity}</span>
-              <span class="sub-badge">Alert: {safe_esc(v.get('alert_id') or '-')}</span>
-              <span class="sub-badge">Assign: {safe_esc(v.get('assignment_id') or '-')}</span>
+              <span class="sub-badge">Alarm: <b>{safe_esc(v.get('alarm_id') or v.get('alert_id') or '-')}</b></span>
+              <span class="sub-badge">Assign: <b>{safe_esc(v.get('assignment_id') or '-')}</b></span>
+              {op_badge}
             </div>
-            <div class="status-pill {cls}">
-              <span class="status-dot">{status_icon}</span> {safe_esc(state)}
+            <div class="card-header-right">
+              <div class="status-pill {cls}">
+                <span class="status-dot"></span> {status_text}
+              </div>
+              <button type="button" class="btn-inspect" onclick="openTimeline('{safe_esc(v.get('ticket_id'))}')" title="Inspect complete chronological communication timeline">
+                Inspect Timeline
+              </button>
             </div>
           </div>
           <div class="card-body">
             <div class="card-summary">
-              <div><b>Summary:</b> {safe_esc(cw.get('response_summary') or 'No call response yet.')}</div>
+              <div><span class="summary-label">Summary:</span> {safe_esc(cw.get('response_summary') or 'No call response yet.')}</div>
               <div class="followup-info">Follow-up: <b>{safe_esc(v.get('followup', {}).get('state') or 'None')}</b></div>
             </div>
             <div class="calls-timeline">
-              {calls_html or '<div class="no-calls">No outbound call records logged yet for this ticket.</div>'}
+              {calls_html or '<div class="no-calls">No voice call attempts recorded.</div>'}
             </div>
+            {f'<div class="wa-container">{wa_html}</div>' if wa_html else ''}
           </div>
           <div class="card-footer">
-            <span>🕒 Event Timestamp: <b>{time_str}</b></span>
+            <span>Event Timestamp: <b>{time_str}</b></span>
+            <span>Last Event ID: <b>{safe_esc(v.get('last_event_id') or '-')}</b></span>
             <span>Ticket Status: <b>{safe_esc(v.get('status') or 'Active')}</b></span>
           </div>
         </div>"""
 
     ack_rate = f"{int((ack_count / total_tickets) * 100)}%" if total_tickets > 0 else "0%"
-    mode = "DRY RUN (Simulator)" if CFG["dry_run"] else f"LIVE GATEWAY · {safe_esc(CFG.get('base_url') or 'Connected')}"
-    lang_options = "".join(f"<option value='{c}'>{texts.LANGS[c]['name']}</option>" for c in texts.LANGS)
+    mode = "DRY RUN (Simulator)" if CFG["dry_run"] else f"LIVE GATEWAY - {safe_esc(CFG.get('base_url') or 'Connected')}"
 
     return f"""<!doctype html>
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>NextAsk Voice Platform · Live Operations Console</title>
+  <title>NexTask Voice Platform - Operations & Audit Center</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@500;600&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
   <style>
     :root {{
-      --primary: #0969da;
-      --primary-hover: #0856b3;
       --bg: #f8fafc;
       --card-bg: #ffffff;
       --border: #e2e8f0;
       --text: #0f172a;
       --text-muted: #64748b;
-      --success: #10b981;
-      --warning: #f59e0b;
-      --danger: #ef4444;
-      --purple: #8b5cf6;
+      --primary: #0969da;
+      --primary-hover: #0856b3;
+      --sidebar-bg: #0f172a;
     }}
     * {{ box-sizing: border-box; margin: 0; padding: 0; }}
     body {{
@@ -630,148 +780,108 @@ def dashboard_html():
       display: flex;
       flex-direction: column;
     }}
+
+    /* Global Header */
     header {{
       background: #0f172a;
       color: #fff;
-      padding: 16px 32px;
+      padding: 12px 28px;
       display: flex;
       justify-content: space-between;
       align-items: center;
-      flex-wrap: wrap;
-      gap: 16px;
-      box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+      box-shadow: 0 1px 3px rgba(0,0,0,0.12);
+      position: sticky;
+      top: 0;
+      z-index: 100;
     }}
-    .brand {{
+    .brand-group {{
       display: flex;
       align-items: center;
       gap: 12px;
     }}
     .brand-icon {{
-      width: 40px;
-      height: 40px;
-      border-radius: 10px;
-      background: linear-gradient(135deg, #38bdf8, #2563eb);
+      width: 32px;
+      height: 32px;
+      background: linear-space;
+      background: #0969da;
+      border-radius: 8px;
       display: flex;
       align-items: center;
       justify-content: center;
-      font-size: 20px;
-      box-shadow: 0 0 16px rgba(56, 189, 248, 0.4);
+      color: #fff;
     }}
     .brand-title {{
-      font-size: 17px;
+      font-size: 15px;
       font-weight: 700;
       letter-spacing: -0.01em;
       color: #f8fafc;
     }}
-    .brand-subtitle {{
-      font-size: 12px;
+    .brand-mode {{
+      font-size: 11px;
       color: #94a3b8;
+      font-family: 'JetBrains Mono', monospace;
     }}
     .header-actions {{
       display: flex;
       align-items: center;
-      gap: 12px;
-    }}
-    .live-pulse {{
-      display: inline-flex;
-      align-items: center;
-      gap: 6px;
-      background: rgba(16, 185, 129, 0.15);
-      border: 1px solid rgba(16, 185, 129, 0.3);
-      color: #34d399;
-      padding: 6px 12px;
-      border-radius: 20px;
-      font-size: 12px;
-      font-weight: 600;
-    }}
-    .pulse-dot {{
-      width: 8px;
-      height: 8px;
-      border-radius: 50%;
-      background: #10b981;
-      animation: pulse 1.8s infinite;
-    }}
-    @keyframes pulse {{
-      0% {{ transform: scale(0.95); box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.7); }}
-      70% {{ transform: scale(1); box-shadow: 0 0 0 6px rgba(16, 185, 129, 0); }}
-      100% {{ transform: scale(0.95); box-shadow: 0 0 0 0 rgba(16, 185, 129, 0); }}
+      gap: 10px;
     }}
     .btn-header {{
-      background: rgba(255, 255, 255, 0.1);
-      border: 1px solid rgba(255, 255, 255, 0.2);
-      color: #fff;
-      padding: 7px 14px;
+      background: rgba(255,255,255,0.08);
+      color: #e2e8f0;
+      border: 1px solid rgba(255,255,255,0.15);
+      padding: 6px 12px;
       border-radius: 6px;
+      font-size: 12px;
+      font-weight: 500;
       text-decoration: none;
-      font-size: 13px;
-      font-weight: 600;
       display: inline-flex;
       align-items: center;
       gap: 6px;
-      cursor: pointer;
-      transition: background 0.2s ease;
+      transition: background 0.15s ease, border-color 0.15s ease;
     }}
     .btn-header:hover {{
-      background: rgba(255, 255, 255, 0.2);
+      background: rgba(255,255,255,0.15);
+      color: #ffffff;
+      border-color: rgba(255,255,255,0.3);
     }}
-    .btn-logout {{
-      background: rgba(239, 68, 68, 0.2);
-      border-color: rgba(239, 68, 68, 0.4);
-      color: #fca5a5;
-    }}
-    .btn-logout:hover {{
-      background: rgba(239, 68, 68, 0.35);
-      color: #fff;
-    }}
+
+    /* Main Container */
     main {{
-      max-width: 1200px;
-      margin: 24px auto;
-      padding: 0 20px;
-      flex: 1;
+      max-width: 1360px;
       width: 100%;
+      margin: 0 auto;
+      padding: 24px 28px 60px 28px;
+      flex: 1;
     }}
-    /* Metric Cards Grid */
+
+    /* Metrics Grid */
     .metrics-grid {{
       display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
-      gap: 16px;
+      grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+      gap: 14px;
       margin-bottom: 24px;
     }}
     .metric-card {{
       background: var(--card-bg);
       border: 1px solid var(--border);
-      border-radius: 12px;
-      padding: 20px;
-      box-shadow: 0 1px 3px rgba(0,0,0,0.05);
-      position: relative;
-      overflow: hidden;
+      border-radius: 10px;
+      padding: 14px 16px;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.03);
+      transition: transform 0.15s ease, box-shadow 0.15s ease;
       cursor: pointer;
-      transition: transform 0.15s ease, box-shadow 0.15s ease, border-color 0.15s ease;
     }}
     .metric-card:hover {{
       transform: translateY(-2px);
-      box-shadow: 0 6px 16px rgba(0,0,0,0.08);
-      border-color: #cbd5e1;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.06);
     }}
-    .metric-card::before {{
-      content: '';
-      position: absolute;
-      top: 0;
-      left: 0;
-      right: 0;
-      height: 4px;
-    }}
-    .metric-blue::before {{ background: #2563eb; }}
-    .metric-green::before {{ background: #10b981; }}
-    .metric-amber::before {{ background: #f59e0b; }}
-    .metric-purple::before {{ background: #8b5cf6; }}
     .metric-label {{
-      font-size: 12px;
+      font-size: 11px;
       font-weight: 600;
-      color: var(--text-muted);
       text-transform: uppercase;
-      letter-spacing: 0.05em;
-      margin-bottom: 8px;
+      letter-spacing: 0.04em;
+      color: var(--text-muted);
+      margin-bottom: 6px;
     }}
     .metric-value-row {{
       display: flex;
@@ -779,249 +889,401 @@ def dashboard_html():
       justify-content: space-between;
     }}
     .metric-number {{
-      font-size: 32px;
+      font-size: 22px;
       font-weight: 800;
       color: var(--text);
-      letter-spacing: -0.02em;
+      font-feature-settings: "tnum";
     }}
     .metric-badge {{
-      font-size: 12px;
-      font-weight: 700;
-      padding: 4px 10px;
-      border-radius: 20px;
+      font-size: 11px;
+      padding: 2px 7px;
+      border-radius: 12px;
+      font-weight: 600;
     }}
     .badge-blue {{ background: #eff6ff; color: #1d4ed8; }}
-    .badge-green {{ background: #ecfdf5; color: #047857; }}
+    .badge-cyan {{ background: #ecfeff; color: #0e7490; }}
     .badge-amber {{ background: #fffbeb; color: #b45309; }}
-    .badge-purple {{ background: #f5f3ff; color: #6d28d9; }}
-    /* Dispatch Bar */
-    .dispatch-box {{
+    .badge-red {{ background: #fef2f2; color: #b91c1c; }}
+    .badge-green {{ background: #f0fdf4; color: #15803d; }}
+    .badge-purple {{ background: #faf5ff; color: #7e22ce; }}
+    .badge-slate {{ background: #f8fafc; color: #475569; }}
+
+    /* Analytics Charts Grid */
+    .analytics-grid {{
+      display: grid;
+      grid-template-columns: 1fr 1fr 1fr;
+      gap: 16px;
+      margin-bottom: 24px;
+    }}
+    @media (max-width: 1024px) {{
+      .analytics-grid {{ grid-template-columns: 1fr; }}
+    }}
+    .chart-card {{
       background: var(--card-bg);
       border: 1px solid var(--border);
-      border-radius: 12px;
-      margin-bottom: 24px;
-      box-shadow: 0 1px 3px rgba(0,0,0,0.05);
-      overflow: hidden;
+      border-radius: 10px;
+      padding: 16px 18px;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.03);
     }}
-    .dispatch-header {{
+    .chart-header {{
+      margin-bottom: 12px;
+      border-bottom: 1px solid #f1f5f9;
+      padding-bottom: 8px;
+    }}
+    .chart-title {{
+      font-size: 13px;
+      font-weight: 700;
+      color: #1e293b;
+    }}
+    .chart-subtitle {{
+      font-size: 11px;
+      color: #64748b;
+      margin-top: 2px;
+    }}
+    .chart-container {{
+      position: relative;
+      height: 200px;
+      width: 100%;
+    }}
+
+    /* Filter Console */
+    .filter-console {{
+      background: var(--card-bg);
+      border: 1px solid var(--border);
+      border-radius: 10px;
       padding: 16px 20px;
-      background: #f1f5f9;
+      margin-bottom: 20px;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.03);
+    }}
+    .filter-console-header {{
       display: flex;
       justify-content: space-between;
       align-items: center;
-      cursor: pointer;
-      user-select: none;
+      margin-bottom: 14px;
+      flex-wrap: wrap;
+      gap: 10px;
     }}
-    .dispatch-title {{
-      font-size: 14px;
+    .console-title {{
+      font-size: 13px;
       font-weight: 700;
       color: #1e293b;
       display: flex;
       align-items: center;
       gap: 8px;
     }}
-    .dispatch-body {{
-      padding: 20px;
-      display: none;
-    }}
-    .dispatch-form {{
-      display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
-      gap: 14px;
-      align-items: end;
-    }}
-    .form-group {{
-      display: flex;
-      flex-direction: column;
-      gap: 6px;
-    }}
-    .form-group label {{
-      font-size: 12px;
-      font-weight: 600;
-      color: var(--text-muted);
-    }}
-    .form-group input, .form-group select {{
-      padding: 9px 12px;
-      border: 1px solid #cbd5e1;
-      border-radius: 6px;
-      font-size: 13px;
-      font-family: inherit;
-    }}
-    .btn-dispatch {{
-      background: #0969da;
-      color: #fff;
-      border: none;
-      padding: 10px 18px;
-      border-radius: 6px;
-      font-weight: 600;
-      font-size: 13px;
-      cursor: pointer;
-      height: 40px;
-      transition: background 0.15s ease;
-    }}
-    .btn-dispatch:hover {{
-      background: #0856b3;
-    }}
-    /* Tabs & Filter Bar */
-    .controls-bar {{
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      flex-wrap: wrap;
-      gap: 16px;
-      margin-bottom: 20px;
-    }}
-    .filter-pills {{
+    .console-actions {{
       display: flex;
       gap: 8px;
-      flex-wrap: wrap;
+      align-items: center;
     }}
-    .filter-btn {{
+    .btn-reset {{
+      background: #f1f5f9;
+      color: #475569;
+      border: 1px solid #cbd5e1;
+      padding: 6px 14px;
+      border-radius: 6px;
+      font-size: 11.5px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: background 0.15s ease;
+    }}
+    .btn-reset:hover {{
+      background: #e2e8f0;
+    }}
+    .search-row {{
+      display: flex;
+      gap: 10px;
+      align-items: center;
+      margin-bottom: 14px;
+    }}
+    .search-box-wrap {{
+      position: relative;
+      flex: 1;
+    }}
+    .search-input-main {{
+      width: 100%;
+      box-sizing: border-box;
+      padding: 10px 14px 10px 38px;
+      border: 1px solid #cbd5e1;
+      border-radius: 8px;
+      font-size: 13px;
+      font-family: inherit;
+      background: #f8fafc;
+      transition: border-color 0.15s ease, background 0.15s ease;
+    }}
+    .search-input-main:focus {{
+      outline: none;
       background: #fff;
-      border: 1px solid var(--border);
-      color: #334155;
-      padding: 9px 16px;
+      border-color: #0969da;
+      box-shadow: 0 0 0 3px rgba(9, 105, 218, 0.1);
+    }}
+    .btn-search-main {{
+      background: #0969da;
+      color: #ffffff;
+      border: 1px solid #0969da;
+      padding: 0 22px;
+      height: 40px;
       border-radius: 8px;
       font-size: 13px;
       font-weight: 600;
       cursor: pointer;
-      transition: all 0.15s ease;
+      transition: background 0.15s ease;
+      white-space: nowrap;
       display: inline-flex;
       align-items: center;
-      gap: 6px;
+      justify-content: center;
+      box-sizing: border-box;
+      flex-shrink: 0;
+    }}
+    .btn-search-main:hover {{
+      background: #0856b3;
+      border-color: #0856b3;
+    }}
+    .btn-apply-filters {{
+      background: #0969da;
+      color: #ffffff;
+      border: 1px solid #0969da;
+      padding: 6px 14px;
+      border-radius: 6px;
+      font-size: 11.5px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: background 0.15s ease;
+    }}
+    .btn-apply-filters:hover {{
+      background: #0856b3;
+      border-color: #0856b3;
+    }}
+    .search-icon-main {{
+      position: absolute;
+      left: 12px;
+      top: 50%;
+      transform: translateY(-50%);
+      color: #94a3b8;
+      display: flex;
+      align-items: center;
+    }}
+    .filter-controls-grid {{
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+      gap: 10px;
+      margin-bottom: 12px;
+    }}
+    .filter-field {{
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }}
+    .filter-field label {{
+      font-size: 11px;
+      font-weight: 600;
+      color: #64748b;
+      text-transform: uppercase;
+      letter-spacing: 0.03em;
+    }}
+    .filter-field select, .filter-field input {{
+      padding: 7px 10px;
+      border: 1px solid #cbd5e1;
+      border-radius: 6px;
+      font-size: 12px;
+      font-family: inherit;
+      background: #fff;
+    }}
+    .filter-field select:focus, .filter-field input:focus {{
+      outline: none;
+      border-color: #0969da;
+    }}
+    .filter-pills-row {{
+      display: flex;
+      gap: 8px;
+      align-items: center;
+      flex-wrap: wrap;
+      border-top: 1px solid #f1f5f9;
+      padding-top: 12px;
+    }}
+    .pill-label {{
+      font-size: 11.5px;
+      font-weight: 600;
+      color: #64748b;
+      margin-right: 4px;
+    }}
+    .filter-btn {{
+      background: #f8fafc;
+      border: 1px solid #e2e8f0;
+      padding: 5px 12px;
+      border-radius: 6px;
+      font-size: 12px;
+      font-weight: 500;
+      cursor: pointer;
+      color: #475569;
+      transition: all 0.15s ease;
     }}
     .filter-btn:hover {{
       background: #f1f5f9;
       border-color: #cbd5e1;
     }}
     .filter-btn.active {{
-      background: #0969da !important;
-      color: #ffffff !important;
-      border-color: #0969da !important;
-      box-shadow: 0 2px 6px rgba(9, 105, 218, 0.35);
+      background: #0969da;
+      border-color: #0969da;
+      color: #ffffff;
+      font-weight: 600;
     }}
-    .search-box {{
-      position: relative;
-      min-width: 280px;
-    }}
-    .search-input {{
-      width: 100%;
-      padding: 9px 14px 9px 36px;
-      border: 1px solid var(--border);
+
+    .filter-feedback-banner {{
+      background: #eff6ff;
+      border: 1px solid #bfdbfe;
+      color: #1e40af;
+      padding: 9px 14px;
       border-radius: 8px;
-      font-size: 13px;
-      font-family: inherit;
-      background: #fff;
+      font-size: 12.5px;
+      margin-bottom: 14px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
     }}
-    .search-icon {{
-      position: absolute;
-      left: 12px;
-      top: 50%;
-      transform: translateY(-50%);
-      color: #94a3b8;
-      font-size: 14px;
-    }}
+
     /* Ticket Cards */
     .ticket-card {{
       background: var(--card-bg);
       border: 1px solid var(--border);
-      border-radius: 12px;
-      margin-bottom: 16px;
-      box-shadow: 0 1px 3px rgba(0,0,0,0.04);
-      transition: box-shadow 0.2s ease, border-color 0.2s ease;
+      border-radius: 10px;
+      margin-bottom: 12px;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.03);
+      transition: box-shadow 0.15s ease, border-color 0.15s ease;
     }}
     .ticket-card:hover {{
-      box-shadow: 0 4px 12px rgba(0,0,0,0.08);
+      box-shadow: 0 4px 12px rgba(0,0,0,0.06);
       border-color: #cbd5e1;
     }}
     .card-header {{
-      padding: 16px 20px;
+      padding: 12px 18px;
       display: flex;
       justify-content: space-between;
       align-items: center;
       flex-wrap: wrap;
-      gap: 12px;
+      gap: 10px;
       border-bottom: 1px solid #f1f5f9;
     }}
     .ticket-primary {{
       display: flex;
       align-items: center;
-      gap: 10px;
+      gap: 8px;
       flex-wrap: wrap;
     }}
     .ticket-id {{
-      font-family: 'JetBrains Mono', monospace;
-      font-size: 15px;
+      font-size: 14px;
       font-weight: 700;
+      font-family: 'JetBrains Mono', monospace;
       color: #0f172a;
     }}
     .site-badge {{
       background: #f1f5f9;
       color: #334155;
-      padding: 4px 10px;
-      border-radius: 6px;
-      font-size: 12px;
-      font-weight: 600;
+      padding: 2px 8px;
+      border-radius: 4px;
+      font-size: 11.5px;
+      font-weight: 500;
     }}
     .sev-badge {{
       font-size: 11px;
       font-weight: 700;
-      padding: 3px 8px;
+      padding: 2px 8px;
       border-radius: 4px;
       text-transform: uppercase;
+      letter-spacing: 0.04em;
     }}
-    .sev-critical {{ background: #fee2e2; color: #991b1b; }}
-    .sev-major {{ background: #fef3c7; color: #92400e; }}
-    .sev-normal {{ background: #e0f2fe; color: #075985; }}
+    .sev-critical {{ background: #fef2f2; color: #dc2626; border: 1px solid #fecaca; }}
+    .sev-major {{ background: #fffbeb; color: #d97706; border: 1px solid #fde68a; }}
+    .sev-normal {{ background: #f0fdf4; color: #16a34a; border: 1px solid #bbf7d0; }}
     .sub-badge {{
       font-size: 11px;
       color: #64748b;
+      background: #f8fafc;
+      border: 1px solid #e2e8f0;
+      padding: 2px 6px;
+      border-radius: 4px;
+    }}
+    .sub-badge b {{ color: #1e293b; }}
+    .op-badge {{ background: #f0fdfa; border-color: #ccfbf1; color: #0d9488; }}
+    .op-badge b {{ color: #0f766e; }}
+
+    .card-header-right {{
+      display: flex;
+      align-items: center;
+      gap: 10px;
     }}
     .status-pill {{
-      padding: 5px 12px;
+      font-size: 11.5px;
+      font-weight: 600;
+      padding: 3px 10px;
       border-radius: 20px;
-      font-size: 12px;
-      font-weight: 700;
       display: inline-flex;
       align-items: center;
       gap: 6px;
     }}
-    .status-ok {{ background: #dcfce7; color: #15803d; }}
-    .status-calling {{ background: #dbeafe; color: #1e40af; }}
-    .status-warn {{ background: #fef3c7; color: #b45309; }}
-    .status-bad {{ background: #fee2e2; color: #b91c1c; }}
+    .status-dot {{
+      width: 7px;
+      height: 7px;
+      border-radius: 50%;
+    }}
+    .status-ack {{ background: #f0fdf4; color: #166534; }}
+    .status-ack .status-dot {{ background: #16a34a; }}
+    .status-calling {{ background: #eff6ff; color: #1e40af; }}
+    .status-calling .status-dot {{ background: #2563eb; }}
+    .status-escalated {{ background: #fef2f2; color: #991b1b; }}
+    .status-escalated .status-dot {{ background: #dc2626; }}
+    .status-assigned {{ background: #f8fafc; color: #475569; }}
+    .status-assigned .status-dot {{ background: #94a3b8; }}
+
+    .btn-inspect {{
+      background: #ffffff;
+      color: #0969da;
+      border: 1px solid #0969da;
+      padding: 4px 10px;
+      border-radius: 6px;
+      font-size: 11.5px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: background 0.15s ease, color 0.15s ease;
+    }}
+    .btn-inspect:hover {{
+      background: #0969da;
+      color: #ffffff;
+    }}
+
     .card-body {{
-      padding: 16px 20px;
+      padding: 14px 18px;
     }}
     .card-summary {{
-      font-size: 13.5px;
+      font-size: 13px;
       color: #334155;
-      margin-bottom: 14px;
+      margin-bottom: 12px;
       display: flex;
       justify-content: space-between;
       flex-wrap: wrap;
-      gap: 10px;
+      gap: 8px;
+    }}
+    .summary-label {{
+      font-weight: 600;
+      color: #1e293b;
     }}
     .followup-info {{
       font-size: 12px;
       color: #64748b;
     }}
-    .calls-timeline {{
-      display: flex;
-      flex-direction: column;
-      gap: 8px;
-    }}
-    .call-row {{
+
+    .call-row, .wa-row {{
       background: #f8fafc;
-      border: 1px solid #e2e8f0;
-      border-radius: 8px;
-      padding: 10px 14px;
+      border: 1px solid #f1f5f9;
+      border-radius: 6px;
+      padding: 8px 12px;
+      margin-bottom: 6px;
       display: flex;
       justify-content: space-between;
       align-items: center;
       flex-wrap: wrap;
-      gap: 10px;
-      font-size: 12.5px;
+      gap: 8px;
+      font-size: 12px;
     }}
     .call-role {{
       display: flex;
@@ -1029,272 +1291,959 @@ def dashboard_html():
       gap: 8px;
     }}
     .role-badge {{
-      background: #0f172a;
-      color: #fff;
-      padding: 2px 8px;
-      border-radius: 4px;
       font-weight: 600;
-      font-size: 11px;
+      color: #1e293b;
     }}
     .phone-number {{
       font-family: 'JetBrains Mono', monospace;
-      color: #334155;
-      font-weight: 500;
+      color: #64748b;
+      font-size: 11.5px;
+    }}
+    .wa-badge {{
+      background: #dcfce7;
+      color: #15803d;
+      font-weight: 600;
+      padding: 1px 6px;
+      border-radius: 4px;
+      font-size: 11px;
+    }}
+    .corr-id {{
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 10.5px;
+      color: #0969da;
+      background: #eff6ff;
+      border: 1px solid #bfdbfe;
+      padding: 1px 6px;
+      border-radius: 4px;
+      cursor: pointer;
+    }}
+    .corr-id:hover {{
+      background: #dbeafe;
+    }}
+    .corr-id-wa {{
+      color: #047857;
+      background: #ecfdf5;
+      border-color: #a7f3d0;
     }}
     .call-meta {{
       display: flex;
-      align-items: center;
       gap: 10px;
+      align-items: center;
       flex-wrap: wrap;
     }}
     .meta-tag {{
       color: #64748b;
     }}
     .meta-tag b {{
-      color: #0f172a;
+      color: #1e293b;
     }}
-    .response-tag b {{
-      color: #0969da;
+    .wa-status {{
+      color: #059669;
     }}
     .badge-superseded {{
       background: #f1f5f9;
       color: #94a3b8;
-      font-style: italic;
-      padding: 2px 6px;
+      padding: 1px 5px;
       border-radius: 4px;
-      font-size: 11px;
+      font-size: 10px;
     }}
     .no-calls {{
-      font-size: 13px;
+      font-size: 12.5px;
       color: #94a3b8;
       font-style: italic;
-      padding: 8px 0;
+      padding: 4px 0;
     }}
+
     .card-footer {{
-      padding: 10px 20px;
+      padding: 10px 18px;
       background: #f8fafc;
       border-top: 1px solid #f1f5f9;
-      border-bottom-left-radius: 12px;
-      border-bottom-right-radius: 12px;
+      border-bottom-left-radius: 10px;
+      border-bottom-right-radius: 10px;
       display: flex;
       justify-content: space-between;
-      font-size: 11.5px;
+      font-size: 11px;
+      color: #64748b;
+      flex-wrap: wrap;
+      gap: 6px;
+    }}
+    .card-footer b {{
+      color: #334155;
+    }}
+
+    /* Pagination Bar */
+    .pagination-bar {{
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 14px 4px;
+      flex-wrap: wrap;
+      gap: 10px;
+    }}
+    .pagination-info {{
+      font-size: 12.5px;
       color: #64748b;
     }}
+    .pagination-controls {{
+      display: flex;
+      gap: 4px;
+      align-items: center;
+    }}
+    .page-btn {{
+      background: #ffffff;
+      border: 1px solid #cbd5e1;
+      color: #334155;
+      padding: 5px 11px;
+      border-radius: 6px;
+      font-size: 12px;
+      font-weight: 500;
+      cursor: pointer;
+      transition: background 0.15s ease, border-color 0.15s ease;
+    }}
+    .page-btn:hover:not(:disabled) {{
+      background: #f1f5f9;
+      border-color: #94a3b8;
+    }}
+    .page-btn.active {{
+      background: #0969da;
+      border-color: #0969da;
+      color: #ffffff;
+      font-weight: 700;
+    }}
+    .page-btn:disabled {{
+      opacity: 0.4;
+      cursor: not-allowed;
+    }}
+    .page-ellipsis {{
+      padding: 0 4px;
+      color: #94a3b8;
+    }}
+
+    /* Modal Backdrop & Timeline Dialog */
+    .modal-backdrop {{
+      position: fixed;
+      inset: 0;
+      background: rgba(15, 23, 42, 0.65);
+      backdrop-filter: blur(4px);
+      z-index: 1000;
+      display: none;
+      align-items: center;
+      justify-content: center;
+      padding: 20px;
+    }}
+    .modal-card {{
+      background: #ffffff;
+      border-radius: 14px;
+      max-width: 720px;
+      width: 100%;
+      max-height: 85vh;
+      display: flex;
+      flex-direction: column;
+      box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04);
+      border: 1px solid #e2e8f0;
+      overflow: hidden;
+    }}
+    .modal-header {{
+      padding: 16px 20px;
+      border-bottom: 1px solid #e2e8f0;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      background: #f8fafc;
+    }}
+    .modal-title {{
+      font-size: 15px;
+      font-weight: 700;
+      color: #0f172a;
+    }}
+    .btn-modal-close {{
+      background: transparent;
+      border: none;
+      font-size: 20px;
+      line-height: 1;
+      color: #64748b;
+      cursor: pointer;
+      padding: 4px;
+    }}
+    .btn-modal-close:hover {{
+      color: #0f172a;
+    }}
+    .modal-body {{
+      padding: 20px;
+      overflow-y: auto;
+      flex: 1;
+    }}
+
+    .timeline-stream {{
+      position: relative;
+      padding-left: 28px;
+    }}
+    .timeline-stream::before {{
+      content: "";
+      position: absolute;
+      left: 8px;
+      top: 6px;
+      bottom: 6px;
+      width: 2px;
+      background: #e2e8f0;
+    }}
+    .timeline-item {{
+      position: relative;
+      margin-bottom: 18px;
+    }}
+    .timeline-item:last-child {{
+      margin-bottom: 0;
+    }}
+    .timeline-node {{
+      position: absolute;
+      left: -28px;
+      top: 3px;
+      width: 18px;
+      height: 18px;
+      border-radius: 50%;
+      background: #ffffff;
+      border: 3px solid #0969da;
+    }}
+    .timeline-node.node-voice {{ border-color: #2563eb; }}
+    .timeline-node.node-whatsapp {{ border-color: #059669; }}
+    .timeline-node.node-escalation {{ border-color: #dc2626; }}
+    .timeline-node.node-ack {{ border-color: #10b981; }}
+    .timeline-content {{
+      background: #f8fafc;
+      border: 1px solid #e2e8f0;
+      border-radius: 8px;
+      padding: 10px 14px;
+    }}
+    .timeline-header-row {{
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 4px;
+      flex-wrap: wrap;
+      gap: 6px;
+    }}
+    .timeline-cat {{
+      font-size: 11px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      color: #1e293b;
+    }}
+    .timeline-time {{
+      font-size: 11px;
+      font-family: 'JetBrains Mono', monospace;
+      color: #64748b;
+    }}
+    .timeline-desc {{
+      font-size: 12.5px;
+      color: #334155;
+      line-height: 1.45;
+    }}
+    .timeline-corr {{
+      margin-top: 6px;
+      display: flex;
+      gap: 6px;
+      flex-wrap: wrap;
+    }}
+
     .empty-state {{
       background: #fff;
       border: 1px solid var(--border);
-      border-radius: 12px;
-      padding: 48px 24px;
+      border-radius: 10px;
+      padding: 40px 20px;
       text-align: center;
       color: #64748b;
-      font-size: 14px;
+      font-size: 13.5px;
       display: none;
     }}
   </style>
 </head>
 <body>
   <header>
-    <div class="brand">
-      <div class="brand-icon">⚡</div>
+    <div class="brand-group">
+      <div class="brand-icon">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z"></path></svg>
+      </div>
       <div>
-        <div class="brand-title">NextAsk Voice Operations Platform</div>
-        <div class="brand-subtitle">{mode} · Attempts {CFG['tech_max_attempts']} · Reject Key {CFG['default_reject_digit']}</div>
+        <div class="brand-title">NexTask Voice Operations & Audit Center</div>
+        <div class="brand-mode">{mode}</div>
       </div>
     </div>
     <div class="header-actions">
-      <div class="live-pulse">
-        <span class="pulse-dot"></span> Live Console
-      </div>
-      <button onclick="window.location.reload()" class="btn-header" title="Refresh data">🔄 Refresh</button>
-      <a href="/api/logs/download" class="btn-header" download>📥 Export Logs</a>
-      <a href="/logout" class="btn-header btn-logout">🚪 Logout</a>
+      <a href="/docs" class="btn-header" target="_blank" title="Open API Documentation">API Docs</a>
+      <a href="/logout" class="btn-header" title="Log out from administrative session">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path><polyline points="16 17 21 12 16 7"></polyline><line x1="21" y1="12" x2="9" y2="12"></line></svg>
+        Logout
+      </a>
     </div>
   </header>
 
   <main>
-    <!-- Executive KPI Metrics (Clickable) -->
+    <!-- Executive Audit Counters Grid -->
     <div class="metrics-grid">
-      <div class="metric-card metric-blue" onclick="switchTab('all')" title="Click to view all tickets">
-        <div class="metric-label">Total Dispatch Tickets</div>
+      <div class="metric-card" onclick="quickFilter('all')" title="Total tickets recorded in queue">
+        <div class="metric-label">Total Tickets</div>
         <div class="metric-value-row">
           <div class="metric-number">{total_tickets}</div>
-          <span class="metric-badge badge-blue">View All</span>
+          <span class="metric-badge badge-blue">All</span>
         </div>
       </div>
 
-      <div class="metric-card metric-green" onclick="switchTab('ack')" title="Click to view acknowledged tickets">
-        <div class="metric-label">Calls Acknowledged</div>
+      <div class="metric-card" onclick="quickFilter('assigned')" title="Newly assigned tickets">
+        <div class="metric-label">Assigned Tickets</div>
+        <div class="metric-value-row">
+          <div class="metric-number">{assigned_count}</div>
+          <span class="metric-badge badge-cyan">New</span>
+        </div>
+      </div>
+
+      <div class="metric-card" onclick="quickFilter('pending')" title="Active dialing or awaiting response">
+        <div class="metric-label">Pending / In-Call</div>
+        <div class="metric-value-row">
+          <div class="metric-number">{pending_count}</div>
+          <span class="metric-badge badge-amber">Dialing</span>
+        </div>
+      </div>
+
+      <div class="metric-card" onclick="quickFilter('escalated')" title="Escalated to Team Leader or Manager">
+        <div class="metric-label">Escalated Tickets</div>
+        <div class="metric-value-row">
+          <div class="metric-number">{escalated_count}</div>
+          <span class="metric-badge badge-red">Tier 1 & 2</span>
+        </div>
+      </div>
+
+      <div class="metric-card" onclick="quickFilter('ack')" title="Calls accepted and acknowledged">
+        <div class="metric-label">Acknowledged</div>
         <div class="metric-value-row">
           <div class="metric-number">{ack_count}</div>
           <span class="metric-badge badge-green">{ack_rate} Rate</span>
         </div>
       </div>
 
-      <div class="metric-card metric-amber" onclick="switchTab('calling')" title="Click to view active dialing tickets">
-        <div class="metric-label">Active / Dialing</div>
+      <div class="metric-card" onclick="quickFilter('unresolved')" title="Escalated tickets currently pending resolution">
+        <div class="metric-label">Unresolved Escalations</div>
         <div class="metric-value-row">
-          <div class="metric-number">{calling_count}</div>
-          <span class="metric-badge badge-amber">IVR Calling</span>
+          <div class="metric-number">{unresolved_count}</div>
+          <span class="metric-badge badge-red">Open Attention</span>
         </div>
       </div>
 
-      <div class="metric-card metric-purple" onclick="switchTab('escalated')" title="Click to view escalated tickets">
-        <div class="metric-label">Escalated / Pending</div>
+      <div class="metric-card" title="WhatsApp Template Alerts Sent / Delivered">
+        <div class="metric-label">SMS Dispatched</div>
         <div class="metric-value-row">
-          <div class="metric-number">{escalated_count}</div>
-          <span class="metric-badge badge-purple">Tier 1 & 2</span>
+          <div class="metric-number">{wa_total}</div>
+          <span class="metric-badge badge-purple">{wa_delivered} Deliv</span>
+        </div>
+      </div>
+
+      <div class="metric-card" title="Technical Failures or Call Exceptions">
+        <div class="metric-label">Technical Exceptions</div>
+        <div class="metric-value-row">
+          <div class="metric-number">{calls_failed}</div>
+          <span class="metric-badge badge-slate">Failed Calls</span>
         </div>
       </div>
     </div>
 
-    <!-- Manual Dispatch Collapsible Box -->
-    <div class="dispatch-box">
-      <div class="dispatch-header" onclick="toggleDispatch()">
-        <div class="dispatch-title">
-          <span>⚡ Manual Outbound Voice Dispatcher</span>
-          <span style="font-size:11px;font-weight:500;color:#64748b;">(Click to test call flow)</span>
+    <!-- Live Analytics Graphs Grid -->
+    <div class="analytics-grid">
+      <div class="chart-card">
+        <div class="chart-header">
+          <div class="chart-title">Ticket Status Distribution</div>
+          <div class="chart-subtitle">Real-time status breakdown across all active helpdesk tickets</div>
         </div>
-        <span id="dispatch-toggle-icon" style="font-size:12px;color:#64748b;">▼ Open</span>
+        <div class="chart-container">
+          <canvas id="statusChart"></canvas>
+        </div>
       </div>
-      <div class="dispatch-body" id="dispatch-body">
-        <form method="POST" action="/trigger" class="dispatch-form">
-          <div class="form-group">
-            <label>Alert ID</label>
-            <input name="alert_id" value="ALM1001" required>
-          </div>
-          <div class="form-group">
-            <label>Ticket ID</label>
-            <input name="ticket_id" placeholder="INC0012345" required>
-          </div>
-          <div class="form-group">
-            <label>Site Details</label>
-            <input name="site_details" value="Site 2040, Olaya Branch, Riyadh">
-          </div>
-          <div class="form-group">
-            <label>Language</label>
-            <select name="language">
-              <option value="ask">Ask in Call (IVR Menu)</option>
-              {lang_options}
-            </select>
-          </div>
-          <div class="form-group">
-            <label>Ack Key</label>
-            <input name="ack_digit" value="1" style="max-width:80px;">
-          </div>
-          <div class="form-group">
-            <label>Technician Phone</label>
-            <input name="phone_number" placeholder="+9665XXXXXXXX" required>
-          </div>
-          <div class="form-group">
-            <label>Team Leader Phone</label>
-            <input name="team_leader_number" placeholder="Optional">
-          </div>
-          <div class="form-group">
-            <label>Manager Phone</label>
-            <input name="manager_number" placeholder="Optional">
-          </div>
-          <button type="submit" class="btn-dispatch">⚡ Dial Call</button>
-        </form>
+
+      <div class="chart-card">
+        <div class="chart-header">
+          <div class="chart-title">Incident Severity Breakdown</div>
+          <div class="chart-subtitle">Risk classification distribution across operational sites</div>
+        </div>
+        <div class="chart-container">
+          <canvas id="severityChart"></canvas>
+        </div>
+      </div>
+
+      <div class="chart-card">
+        <div class="chart-header">
+          <div class="chart-title">Voice & SMS Execution</div>
+          <div class="chart-subtitle">Automated IVR call volume vs Twilio SMS notifications</div>
+        </div>
+        <div class="chart-container">
+          <canvas id="activityChart"></canvas>
+        </div>
       </div>
     </div>
 
-    <!-- Tabs & Filter Bar -->
-    <div class="controls-bar" id="ticketsSection">
-      <div class="filter-pills">
-        <button type="button" id="tab-btn-all" class="filter-btn active" onclick="switchTab('all')">📋 All Tickets ({total_tickets})</button>
-        <button type="button" id="tab-btn-ack" class="filter-btn" onclick="switchTab('ack')">✅ Acknowledged ({ack_count})</button>
-        <button type="button" id="tab-btn-calling" class="filter-btn" onclick="switchTab('calling')">📞 Dialing ({calling_count})</button>
-        <button type="button" id="tab-btn-escalated" class="filter-btn" onclick="switchTab('escalated')">⚠️ Escalated ({escalated_count})</button>
+    <!-- Multi-Criteria Audit Search & Filter Console -->
+    <div class="filter-console" id="ticketsSection">
+      <div class="filter-console-header">
+        <div class="console-title">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"></polygon></svg>
+          Multi-Correlation Audit Search & Filters
+        </div>
+        <div class="console-actions">
+          <button type="button" class="btn-apply-filters" onclick="runFilter()">Apply Filters</button>
+          <button type="button" class="btn-reset" onclick="resetAllFilters()">Reset Filters</button>
+        </div>
       </div>
-      <div class="search-box">
-        <span class="search-icon">🔍</span>
-        <input type="text" id="searchInput" class="search-input" placeholder="Search ticket, site, alert ID..." oninput="runFilter()">
+
+      <!-- Primary Correlation Search Box -->
+      <div class="search-row">
+        <div class="search-box-wrap">
+          <span class="search-icon-main">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
+          </span>
+          <input type="text" id="searchInput" class="search-input-main" 
+                 placeholder="Search by Ticket ID, Alarm ID, Assignment ID, Technician Name, Mobile, Call SID, or WAMID..." 
+                 oninput="runFilter()" onkeydown="if(event.key==='Enter') runFilter()">
+        </div>
+        <button type="button" class="btn-search-main" onclick="runFilter()">Search</button>
+      </div>
+
+      <!-- Multi-Criteria Dropdowns Grid -->
+      <div class="filter-controls-grid">
+        <div class="filter-field">
+          <label>From Date</label>
+          <input type="date" id="filterFromDate" onchange="runFilter()">
+        </div>
+        <div class="filter-field">
+          <label>To Date</label>
+          <input type="date" id="filterToDate" onchange="runFilter()">
+        </div>
+        <div class="filter-field">
+          <label>Workflow</label>
+          <select id="filterWorkflow" onchange="runFilter()">
+            <option value="all">All Workflows</option>
+            <option value="uc1_technician">Technician Initial</option>
+            <option value="uc1_escalation">Supervisor Escalation</option>
+            <option value="emergency">Emergency Alert</option>
+          </select>
+        </div>
+        <div class="filter-field">
+          <label>Language</label>
+          <select id="filterLanguage" onchange="runFilter()">
+            <option value="all">All Languages</option>
+            <option value="en">English (en)</option>
+            <option value="ar">Arabic (ar)</option>
+            <option value="ur">Urdu (ur)</option>
+            <option value="hi">Hindi (hi)</option>
+          </select>
+        </div>
+        <div class="filter-field">
+          <label>Call Outcome</label>
+          <select id="filterOutcome" onchange="runFilter()">
+            <option value="all">All Outcomes</option>
+            <option value="acknowledged">Acknowledged</option>
+            <option value="rejected">Rejected</option>
+            <option value="no_input">No Input / Timeout</option>
+            <option value="reached">Reached / Answered</option>
+            <option value="reassign_yes">Reassign Yes</option>
+            <option value="reassign_no">Reassign No</option>
+          </select>
+        </div>
+        <div class="filter-field">
+          <label>Acknowledgement</label>
+          <select id="filterAck" onchange="runFilter()">
+            <option value="all">All States</option>
+            <option value="true">Acknowledged Only</option>
+            <option value="false">Unacknowledged Only</option>
+          </select>
+        </div>
+        <div class="filter-field">
+          <label>SMS Status</label>
+          <select id="filterWaStatus" onchange="runFilter()">
+            <option value="all">All Message Statuses</option>
+            <option value="delivered">Delivered</option>
+            <option value="read">Read</option>
+            <option value="sent">Sent</option>
+            <option value="failed">Failed</option>
+          </select>
+        </div>
+      </div>
+
+      <!-- Quick Filter Pills -->
+      <div class="filter-pills-row">
+        <span class="pill-label">Quick Views:</span>
+        <button type="button" id="tab-btn-all" class="filter-btn active" onclick="switchTab('all')">All Tickets ({total_tickets})</button>
+        <button type="button" id="tab-btn-assigned" class="filter-btn" onclick="switchTab('assigned')">Assigned ({assigned_count})</button>
+        <button type="button" id="tab-btn-pending" class="filter-btn" onclick="switchTab('pending')">Pending / In-Call ({pending_count})</button>
+        <button type="button" id="tab-btn-escalated" class="filter-btn" onclick="switchTab('escalated')">Escalated ({escalated_count})</button>
+        <button type="button" id="tab-btn-ack" class="filter-btn" onclick="switchTab('ack')">Acknowledged ({ack_count})</button>
+        <button type="button" id="tab-btn-unresolved" class="filter-btn" onclick="switchTab('unresolved')">Unresolved Escalations ({unresolved_count})</button>
       </div>
     </div>
 
-    <!-- Empty State for filtered results -->
+    <!-- Active Filter Feedback Banner -->
+    <div id="filterFeedbackBanner" class="filter-feedback-banner" style="display:none;"></div>
+
+    <!-- Empty State -->
     <div id="emptyCategoryMsg" class="empty-state">
-      No tickets found matching the selected filter or search keyword.
+      No tickets found matching the selected search criteria or filter combinations.
+      <div style="margin-top:10px;">
+        <button type="button" class="btn-reset" onclick="resetAllFilters()">Reset All Filters</button>
+      </div>
     </div>
 
     <!-- Tickets Feed -->
     <div id="ticketsList">
-      {cards or '<div class="empty-state" style="display:block;">No active tickets in queue. Use Alert Intake API (/api/alerts) or the manual dispatcher above.</div>'}
+      {cards or '<div class="empty-state" style="display:block;">No active tickets in queue. Use Alert Intake API (/api/alerts) or the manual dispatcher.</div>'}
+    </div>
+
+    <!-- Pagination Bar -->
+    <div id="paginationBar" class="pagination-bar">
+      <div id="paginationInfo" class="pagination-info">Showing 1 to 10 of tickets</div>
+      <div id="paginationControls" class="pagination-controls"></div>
     </div>
   </main>
 
+  <!-- Chronological Audit Timeline Modal -->
+  <div id="timelineModal" class="modal-backdrop" onclick="closeTimelineBackdrop(event)">
+    <div class="modal-card">
+      <div class="modal-header">
+        <div>
+          <div style="font-size:11px;color:#94a3b8;text-transform:uppercase;letter-spacing:0.04em;">Audit Evidence Stream</div>
+          <div class="modal-title" id="timelineModalTitle">Timeline Inspection</div>
+        </div>
+        <button type="button" class="btn-modal-close" onclick="closeTimeline()">&times;</button>
+      </div>
+      <div class="modal-body" id="timelineStreamContainer">
+        <!-- Chronological stream populated by JS -->
+      </div>
+    </div>
+  </div>
+
   <script>
-    function toggleDispatch() {{
-      var b = document.getElementById('dispatch-body');
-      var icon = document.getElementById('dispatch-toggle-icon');
-      if (b.style.display === 'block') {{
-        b.style.display = 'none';
-        icon.innerText = '▼ Open';
-      }} else {{
-        b.style.display = 'block';
-        icon.innerText = '▲ Close';
+    var activeCategory = 'all';
+    var PAGE_SIZE = 10;
+    var currentPage = 1;
+
+    function normalizeIsoDate(dStr) {{
+      if (!dStr) return '';
+      dStr = dStr.trim();
+      if (dStr.length === 10 && dStr.charAt(4) === '-' && dStr.charAt(7) === '-') return dStr;
+      var parts = dStr.split(/[-/]/);
+      if (parts.length === 3) {{
+        if (parts[0].length === 4) {{
+          return parts[0] + '-' + parts[1].padStart(2, '0') + '-' + parts[2].padStart(2, '0');
+        }} else if (parts[2].length === 4) {{
+          return parts[2] + '-' + parts[1].padStart(2, '0') + '-' + parts[0].padStart(2, '0');
+        }}
       }}
+      return dStr;
     }}
 
-    var activeCategory = 'all';
-
-    function switchTab(cat) {{
+    function quickFilter(cat) {{
       activeCategory = cat;
-      try {{
-        sessionStorage.setItem('flm_active_tab', cat);
-      }} catch(e) {{}}
-
+      currentPage = 1;
       document.querySelectorAll('.filter-btn').forEach(function(btn) {{
         btn.classList.remove('active');
       }});
-
       var activeBtn = document.getElementById('tab-btn-' + cat);
       if (activeBtn) {{
         activeBtn.classList.add('active');
       }}
-
+      var section = document.getElementById('ticketsSection');
+      if (section) {{
+        section.scrollIntoView({{ behavior: 'smooth', block: 'start' }});
+      }}
       runFilter();
     }}
 
-    function runFilter() {{
-      var q = (document.getElementById('searchInput').value || '').toLowerCase().trim();
-      var cards = document.querySelectorAll('.ticket-card');
-      var visible = 0;
+    function switchTab(cat) {{
+      quickFilter(cat);
+    }}
 
-      cards.forEach(function(card) {{
-        var cat = card.getAttribute('data-category');
-        var text = (card.getAttribute('data-search') || '').toLowerCase();
-        var catMatch = (activeCategory === 'all' || cat === activeCategory);
-        var searchMatch = (!q || text.indexOf(q) !== -1);
+    function resetAllFilters() {{
+      var elSearch = document.getElementById('searchInput'); if (elSearch) elSearch.value = '';
+      var elFrom = document.getElementById('filterFromDate'); if (elFrom) elFrom.value = '';
+      var elTo = document.getElementById('filterToDate'); if (elTo) elTo.value = '';
+      var elWf = document.getElementById('filterWorkflow'); if (elWf) elWf.value = 'all';
+      var elLang = document.getElementById('filterLanguage'); if (elLang) elLang.value = 'all';
+      var elOutcome = document.getElementById('filterOutcome'); if (elOutcome) elOutcome.value = 'all';
+      var elAck = document.getElementById('filterAck'); if (elAck) elAck.value = 'all';
+      var elWa = document.getElementById('filterWaStatus'); if (elWa) elWa.value = 'all';
+      quickFilter('all');
+    }}
 
-        if (catMatch && searchMatch) {{
-          card.style.display = 'block';
-          visible++;
-        }} else {{
-          card.style.display = 'none';
-        }}
+    function copyText(txt) {{
+      if (!txt) return;
+      navigator.clipboard.writeText(txt).then(function() {{
+        alert('Copied to clipboard: ' + txt);
+      }}).catch(function() {{
+        prompt('Copy to clipboard:', txt);
       }});
+    }}
 
-      var emptyEl = document.getElementById('emptyCategoryMsg');
-      if (emptyEl) {{
-        emptyEl.style.display = (visible === 0) ? 'block' : 'none';
+    function goToPage(page) {{
+      currentPage = page;
+      runFilter();
+      var section = document.getElementById('ticketsSection');
+      if (section) {{
+        section.scrollIntoView({{ behavior: 'smooth', block: 'start' }});
       }}
     }}
 
-    // Restore saved tab if user previously selected one
-    try {{
-      var savedTab = sessionStorage.getItem('flm_active_tab');
-      if (savedTab && ['all', 'ack', 'calling', 'escalated'].indexOf(savedTab) !== -1) {{
-        switchTab(savedTab);
+    function renderPagination(totalMatched, totalPages) {{
+      var bar = document.getElementById('paginationBar');
+      var info = document.getElementById('paginationInfo');
+      var controls = document.getElementById('paginationControls');
+
+      if (!bar || !info || !controls) return;
+
+      if (totalMatched === 0) {{
+        bar.style.display = 'none';
+        return;
       }}
-    }} catch(e) {{}}
+      bar.style.display = 'flex';
+
+      var fromNum = (currentPage - 1) * PAGE_SIZE + 1;
+      var toNum = Math.min(currentPage * PAGE_SIZE, totalMatched);
+      info.innerHTML = 'Showing <b>' + fromNum + '</b> to <b>' + toNum + '</b> of <b>' + totalMatched + '</b> tickets';
+
+      var html = '';
+      html += '<button type="button" class="page-btn" ' + (currentPage === 1 ? 'disabled' : '') + ' onclick="goToPage(' + (currentPage - 1) + ')">Previous</button>';
+
+      var pagesToShow = [];
+      for (var p = 1; p <= totalPages; p++) {{
+        if (p === 1 || p === totalPages || (p >= currentPage - 2 && p <= currentPage + 2)) {{
+          pagesToShow.push(p);
+        }}
+      }}
+
+      var lastP = 0;
+      pagesToShow.forEach(function(p) {{
+        if (lastP && p - lastP > 1) {{
+          html += '<span class="page-ellipsis">...</span>';
+        }}
+        var activeCls = (p === currentPage) ? ' active' : '';
+        html += '<button type="button" class="page-btn' + activeCls + '" onclick="goToPage(' + p + ')">' + p + '</button>';
+        lastP = p;
+      }});
+
+      html += '<button type="button" class="page-btn" ' + (currentPage === totalPages ? 'disabled' : '') + ' onclick="goToPage(' + (currentPage + 1) + ')">Next</button>';
+      controls.innerHTML = html;
+    }}
+
+    function runFilter() {{
+      try {{
+        var elSearch = document.getElementById('searchInput');
+        var q = (elSearch ? elSearch.value : '').toLowerCase().trim();
+
+        var elFrom = document.getElementById('filterFromDate');
+        var fromDate = normalizeIsoDate(elFrom ? elFrom.value : '');
+
+        var elTo = document.getElementById('filterToDate');
+        var toDate = normalizeIsoDate(elTo ? elTo.value : '');
+
+        var elWf = document.getElementById('filterWorkflow');
+        var fWf = (elWf ? elWf.value : 'all').toLowerCase();
+
+        var elLang = document.getElementById('filterLanguage');
+        var fLang = (elLang ? elLang.value : 'all').toLowerCase();
+
+        var elOutcome = document.getElementById('filterOutcome');
+        var fOutcome = (elOutcome ? elOutcome.value : 'all').toLowerCase();
+
+        var elAck = document.getElementById('filterAck');
+        var fAck = (elAck ? elAck.value : 'all').toLowerCase();
+
+        var elWa = document.getElementById('filterWaStatus');
+        var fWa = (elWa ? elWa.value : 'all').toLowerCase();
+
+        var cards = document.querySelectorAll('.ticket-card');
+        var matchedCards = [];
+
+        cards.forEach(function(card) {{
+          var cat = card.getAttribute('data-category') || '';
+          var date = card.getAttribute('data-date') || '';
+          var lang = (card.getAttribute('data-lang') || '').toLowerCase();
+          var outcome = (card.getAttribute('data-outcome') || '').toLowerCase();
+          var wf = (card.getAttribute('data-wf') || '').toLowerCase();
+          var ack = (card.getAttribute('data-ack') || '').toLowerCase();
+          var unresolved = (card.getAttribute('data-unresolved') || '').toLowerCase();
+          var waStatus = (card.getAttribute('data-wastatus') || '').toLowerCase();
+          var text = (card.getAttribute('data-search') || '').toLowerCase();
+
+          // 1. Quick View Pill matching
+          var catMatch = (activeCategory === 'all');
+          if (activeCategory === 'unresolved') {{
+            catMatch = (unresolved === 'true');
+          }} else if (activeCategory !== 'all') {{
+            catMatch = (cat === activeCategory);
+          }}
+
+          // 2. Correlation Search box matching
+          var searchMatch = true;
+          if (q) {{
+            searchMatch = (text.indexOf(q) !== -1);
+          }}
+
+          // 3. Date range matching (both YYYY-MM-DD)
+          var dateMatch = true;
+          if (fromDate) {{
+            if (!date || date < fromDate) dateMatch = false;
+          }}
+          if (toDate) {{
+            if (!date || date > toDate) dateMatch = false;
+          }}
+
+          // 4. Workflow matching
+          var wfMatch = (fWf === 'all');
+          if (!wfMatch) {{
+            if (fWf === 'emergency') {{
+              wfMatch = (wf.indexOf('emergency') !== -1 || text.indexOf('emg-') !== -1 || text.indexOf('emergency') !== -1);
+            }} else {{
+              wfMatch = (wf.indexOf(fWf) !== -1);
+            }}
+          }}
+
+          // 5. Language matching
+          var langMatch = (fLang === 'all' || lang.indexOf(fLang) !== -1);
+
+          // 6. Outcome matching
+          var outcomeMatch = (fOutcome === 'all' || outcome.indexOf(fOutcome) !== -1);
+
+          // 7. Acknowledgement matching
+          var ackMatch = (fAck === 'all' || ack === fAck);
+
+          // 8. WhatsApp delivery status matching
+          var waMatch = (fWa === 'all' || waStatus.indexOf(fWa) !== -1);
+
+          if (catMatch && searchMatch && dateMatch && wfMatch && langMatch && outcomeMatch && ackMatch && waMatch) {{
+            matchedCards.push(card);
+          }} else {{
+            card.style.display = 'none';
+          }}
+        }});
+
+        var totalMatched = matchedCards.length;
+        var totalPages = Math.ceil(totalMatched / PAGE_SIZE) || 1;
+        if (currentPage > totalPages) currentPage = totalPages;
+        if (currentPage < 1) currentPage = 1;
+
+        var startIdx = (currentPage - 1) * PAGE_SIZE;
+        var endIdx = startIdx + PAGE_SIZE;
+
+        matchedCards.forEach(function(card, idx) {{
+          if (idx >= startIdx && idx < endIdx) {{
+            card.style.display = 'block';
+          }} else {{
+            card.style.display = 'none';
+          }}
+        }});
+
+        var emptyEl = document.getElementById('emptyCategoryMsg');
+        if (emptyEl) {{
+          emptyEl.style.display = (totalMatched === 0) ? 'block' : 'none';
+        }}
+
+        // Update active filter feedback banner
+        var banner = document.getElementById('filterFeedbackBanner');
+        if (banner) {{
+          var hasActiveFilter = (q !== '' || fromDate !== '' || toDate !== '' || fWf !== 'all' || fLang !== 'all' || fOutcome !== 'all' || fAck !== 'all' || fWa !== 'all' || activeCategory !== 'all');
+          if (hasActiveFilter) {{
+            var filterTags = [];
+            if (activeCategory !== 'all') filterTags.push('Category: ' + activeCategory.toUpperCase());
+            if (q) filterTags.push('Search: "' + q + '"');
+            if (fromDate && toDate) filterTags.push('Date: ' + fromDate + ' to ' + toDate);
+            else if (fromDate) filterTags.push('From: ' + fromDate);
+            else if (toDate) filterTags.push('To: ' + toDate);
+            if (fWf !== 'all') filterTags.push('Workflow: ' + fWf);
+            if (fLang !== 'all') filterTags.push('Lang: ' + fLang);
+            if (fOutcome !== 'all') filterTags.push('Outcome: ' + fOutcome);
+            if (fAck !== 'all') filterTags.push('Ack: ' + (fAck === 'true' ? 'Yes' : 'No'));
+            if (fWa !== 'all') filterTags.push('SMS: ' + fWa);
+
+            banner.innerHTML = '<div><b>Active Filter:</b> ' + filterTags.join(' &bull; ') + ' &mdash; Showing <b>' + totalMatched + '</b> matching ticket(s)</div>' +
+                               '<button type="button" onclick="resetAllFilters()" style="background:#2563eb;color:#fff;border:none;padding:4px 10px;border-radius:4px;font-size:11.5px;font-weight:600;cursor:pointer;">Reset</button>';
+            banner.style.display = 'flex';
+          }} else {{
+            banner.style.display = 'none';
+          }}
+        }}
+
+        renderPagination(totalMatched, totalPages);
+      }} catch(err) {{
+        console.error('runFilter error:', err);
+      }}
+    }}
+
+    // Chronological Audit Timeline Inspection Modal
+    function openTimeline(tid) {{
+      var modal = document.getElementById('timelineModal');
+      var title = document.getElementById('timelineModalTitle');
+      var container = document.getElementById('timelineStreamContainer');
+
+      title.innerText = 'Ticket: ' + tid + ' - Audit Evidence Stream';
+      container.innerHTML = '<div style="text-align:center;color:#64748b;padding:30px;">Querying chronological audit logs from database...</div>';
+      modal.style.display = 'flex';
+
+      fetch('/api/tickets/' + encodeURIComponent(tid) + '/timeline')
+        .then(function(res) {{ return res.json(); }})
+        .then(function(data) {{
+          var stream = (data && data.timeline) || [];
+          if (!stream.length) {{
+            container.innerHTML = '<div style="text-align:center;color:#94a3b8;padding:30px;">No audit log records recorded yet for ' + tid + '.</div>';
+            return;
+          }}
+
+          var html = '';
+          stream.forEach(function(item) {{
+            var cat = item.category || 'event';
+            var ts = item.timestamp || '';
+            var desc = item.description || item.message || '';
+            var sid = item.call_sid || '';
+            var mid = item.provider_message_id || '';
+            var eid = item.event_id || '';
+
+            var nodeClass = 'node-voice';
+            if (cat.indexOf('whatsapp') !== -1) nodeClass = 'node-whatsapp';
+            else if (cat.indexOf('escalat') !== -1 || cat.indexOf('reject') !== -1) nodeClass = 'node-escalation';
+            else if (cat.indexOf('ack') !== -1 || cat.indexOf('valid') !== -1) nodeClass = 'node-ack';
+
+                        var pillsHtml = '';
+            if (sid) pillsHtml += '<span class="corr-id" data-copy="' + sid + '" onclick="copyText(this.dataset.copy)" title="Click to copy Call SID">Call SID: ' + sid + '</span> ';
+            if (mid) pillsHtml += '<span class="corr-id corr-id-wa" data-copy="' + mid + '" onclick="copyText(this.dataset.copy)" title="Click to copy WhatsApp ID">WAMID: ' + mid + '</span> ';
+            if (eid) pillsHtml += '<span class="corr-id" data-copy="' + eid + '" onclick="copyText(this.dataset.copy)" title="Click to copy Event ID">Event ID: ' + eid + '</span> ';
+
+            html += '<div class="timeline-item">' +
+                      '<div class="timeline-node ' + nodeClass + '"></div>' +
+                      '<div class="timeline-content">' +
+                        '<div class="timeline-header-row">' +
+                          '<span class="timeline-cat">' + cat.replace(/_/g, ' ') + '</span>' +
+                          '<span class="timeline-time">' + ts + '</span>' +
+                        '</div>' +
+                        '<div class="timeline-desc">' + desc + '</div>' +
+                        (pillsHtml ? '<div class="timeline-corr">' + pillsHtml + '</div>' : '') +
+                      '</div>' +
+                    '</div>';
+          }});
+
+          container.innerHTML = html;
+        }})
+        .catch(function(err) {{
+          container.innerHTML = '<div style="color:#ef4444;padding:20px;text-align:center;">Failed to query audit stream: ' + err + '</div>';
+        }});
+    }}
+
+    function closeTimeline() {{
+      var modal = document.getElementById('timelineModal');
+      if (modal) modal.style.display = 'none';
+    }}
+
+    function closeTimelineBackdrop(e) {{
+      if (e.target.id === 'timelineModal') {{
+        closeTimeline();
+      }}
+    }}
+
+    document.addEventListener('keydown', function(e) {{
+      if (e.key === 'Escape') closeTimeline();
+    }});
+
+    // Initialize Charts Safely (Never blocking)
+    (function initCharts() {{
+      if (typeof Chart === 'undefined') {{
+        console.warn('Chart.js library is not available or blocked by network.');
+        return;
+      }}
+      try {{
+        const statusData = [{assigned_count}, {pending_count}, {escalated_count}, {ack_count}];
+        const elStatus = document.getElementById('statusChart');
+        if (elStatus) {{
+          new Chart(elStatus.getContext('2d'), {{
+            type: 'doughnut',
+            data: {{
+              labels: ['Assigned', 'Pending / In-Call', 'Escalated', 'Acknowledged'],
+              datasets: [{{
+                data: statusData,
+                backgroundColor: ['#06b6d4', '#f59e0b', '#ef4444', '#10b981'],
+                borderWidth: 2,
+                borderColor: '#ffffff',
+                hoverOffset: 6
+              }}]
+            }},
+            options: {{
+              responsive: true,
+              maintainAspectRatio: false,
+              plugins: {{
+                legend: {{
+                  position: 'bottom',
+                  labels: {{ boxWidth: 12, padding: 14, font: {{ family: 'Inter', size: 11, weight: '500' }}, color: '#475569' }}
+                }}
+              }},
+              cutout: '68%'
+            }}
+          }});
+        }}
+
+        const elSev = document.getElementById('severityChart');
+        if (elSev) {{
+          new Chart(elSev.getContext('2d'), {{
+            type: 'bar',
+            data: {{
+              labels: ['Critical', 'Major', 'Normal / Low'],
+              datasets: [{{
+                label: 'Tickets',
+                data: [{critical_count}, {major_count}, {normal_count}],
+                backgroundColor: ['#dc2626', '#f59e0b', '#2563eb'],
+                borderRadius: 6,
+                barThickness: 28
+              }}]
+            }},
+            options: {{
+              responsive: true,
+              maintainAspectRatio: false,
+              plugins: {{ legend: {{ display: false }} }},
+              scales: {{
+                y: {{ beginAtZero: true, ticks: {{ precision: 0, font: {{ family: 'Inter', size: 11 }} }}, grid: {{ color: '#f1f5f9' }} }},
+                x: {{ grid: {{ display: false }}, ticks: {{ font: {{ family: 'Inter', size: 11 }} }} }}
+              }}
+            }}
+          }});
+        }}
+
+        const elAct = document.getElementById('activityChart');
+        if (elAct) {{
+          new Chart(elAct.getContext('2d'), {{
+            type: 'bar',
+            data: {{
+              labels: ['Total Calls', 'Completed Calls', 'SMS Alerts'],
+              datasets: [{{
+                label: 'Executions',
+                data: [{calls_total}, {calls_completed}, {wa_total}],
+                backgroundColor: ['#4f46e5', '#059669', '#7c3aed'],
+                borderRadius: 6,
+                barThickness: 28
+              }}]
+            }},
+            options: {{
+              responsive: true,
+              maintainAspectRatio: false,
+              plugins: {{ legend: {{ display: false }} }},
+              scales: {{
+                y: {{ beginAtZero: true, ticks: {{ precision: 0, font: {{ family: 'Inter', size: 11 }} }}, grid: {{ color: '#f1f5f9' }} }},
+                x: {{ grid: {{ display: false }}, ticks: {{ font: {{ family: 'Inter', size: 11 }} }} }}
+              }}
+            }}
+          }});
+        }}
+      }} catch(err) {{
+        console.warn('Charts init notice:', err);
+      }}
+    }})();
+
+    // Execute Initial Filter on Page Load
+    runFilter();
   </script>
 </body>
 </html>"""
 
-
-# --------------------------------------------------------------------------- synchronous wait
 def _wants_wait(params):
     return str(params.get("wait", "")).lower() in ("1", "true", "yes")
 
@@ -1665,6 +2614,45 @@ class Handler(BaseHTTPRequestHandler):
                     "auth_type": caller.get("auth_type", "api_key")
                 }
                 return self._json(200, res)
+            if path in ("/api/alerts/update", "/api/update", "/api/updaterecords", "/api/update_records", "/api/records/update"):
+                return self._json(200, {
+                    "status": "ok",
+                    "endpoint": path,
+                    "method": "POST",
+                    "description": "Update ticket records. Follows table (1).tsv requirements (update_type, task_id, optional status/severity, technician details required for reassignment).",
+                    "required_fields": ["task_id", "update_type"],
+                    "reassignment_fields": ["technician_name", "technician_mobile", "technician_preferred_lang"]
+                })
+            if path in ("/api/alerts", "/api/pushrecords", "/api/push_records", "/api/push-records"):
+                return self._json(200, {
+                    "status": "ok",
+                    "endpoint": path,
+                    "method": "POST",
+                    "description": "Push ticket/task records directly into the DB. Accepts single ticket or array of tickets.",
+                    "sample_payload": {
+                        "tickets": [
+                            {
+                                "task_id": "TASK1001",
+                                "issue_description": "Network connectivity failure",
+                                "issue_type": "Network Failure",
+                                "severity": "Critical",
+                                "task_status": "Dispatch",
+                                "alarm_status": "Active",
+                                "site_number": "SITE001",
+                                "created_date": "2026-11-03T10:30:00+03:00",
+                                "technician_name": "Ali",
+                                "technician_mobile": "+966500000001",
+                                "technician_preferred_lang": "English",
+                                "teamleader_name": "Mohammed",
+                                "teamleader_mobile": "+966500000002",
+                                "teamleader_preferred_lang": "Arabic",
+                                "manager_name": "Khalid",
+                                "manager_mobile": "+966500000003",
+                                "manager_preferred_lang": "English"
+                            }
+                        ]
+                    }
+                })
             if path in ("/api/alerts/intake", "/api/alert_intake", "/api/alerts", "/api/alert"):
                 return self._json(200, {
                     "status": "ok",
@@ -1742,6 +2730,10 @@ class Handler(BaseHTTPRequestHandler):
             self._json(400, {"error": str(e)})
 
     def do_PUT(self):
+        path, _, _ = self._parse()
+        if path in ("/api/alerts/update", "/api/update", "/api/updaterecords", "/api/update_records", "/api/records/update",
+                    "/api/alerts", "/api/pushrecords", "/api/push_records", "/api/push-records"):
+            return self.do_POST()
         return self._json(405, {"status": "error", "http_code": 405, "error": "Method Not Allowed"})
 
     def do_DELETE(self):
@@ -1820,6 +2812,42 @@ class Handler(BaseHTTPRequestHandler):
                 })
             if path in ("/api/authorize", "/api/authorization", "/api/verify"):
                 return self._handle_authorize(form=form, params=params)
+            if path in ("/api/alerts/update", "/api/update", "/api/updaterecords", "/api/update_records", "/api/records/update"):
+                code, body = workflow.handle_update_records(form)
+                if isinstance(body, dict):
+                    api_key = self._extract_token(form)
+                    caller = self._resolve_caller(api_key) or {
+                        "username": "api_admin",
+                        "role": "admin",
+                        "auth_type": "api_key"
+                    }
+                    body["authorized"] = True
+                    body["auth"] = {
+                        "status": "authorized",
+                        "user": caller.get("username", "api_admin"),
+                        "role": caller.get("role", "admin"),
+                        "api_key_valid": True,
+                        "auth_type": caller.get("auth_type", "api_key")
+                    }
+                return self._json(code, body)
+            if path in ("/api/alerts", "/api/pushrecords", "/api/push_records", "/api/push-records"):
+                code, body = workflow.handle_push_records(form)
+                if isinstance(body, dict):
+                    api_key = self._extract_token(form)
+                    caller = self._resolve_caller(api_key) or {
+                        "username": "api_admin",
+                        "role": "admin",
+                        "auth_type": "api_key"
+                    }
+                    body["authorized"] = True
+                    body["auth"] = {
+                        "status": "authorized",
+                        "user": caller.get("username", "api_admin"),
+                        "role": caller.get("role", "admin"),
+                        "api_key_valid": True,
+                        "auth_type": caller.get("auth_type", "api_key")
+                    }
+                return self._json(code, body)
             if path in ("/api/alerts/intake", "/api/alert_intake", "/api/alerts", "/api/alert"):
                 code, body = workflow.handle_alert_intake(form)
                 if isinstance(body, dict):
@@ -1952,7 +2980,8 @@ def main():
     print(f"Dashboard        : http://localhost:{CFG['port']}  (this PC only)")
     print(f"Auth API         : POST {base}/api/authenticate (and /api/authorize)")
     print(f"Event API        : POST {base}/api/events")
-    print(f"Alert Intake API : POST {base}/api/alerts/intake")
+    print(f"Alerts / Push API: POST {base}/api/alerts")
+    print(f"Update API       : PUT  {base}/api/alerts/update")
     print(f"Emergency API    : POST {base}/api/emergency_api")
     print(f"Emergency Close  : POST {base}/api/emergency_close")
     print(f"Follow-up API    : POST {base}/api/tickets/<ticket_id>/followup")

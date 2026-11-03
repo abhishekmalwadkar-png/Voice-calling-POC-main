@@ -519,7 +519,9 @@ def _place_call(t, role, attempt, workflow, send_wa=True):
              template, version, now_iso()))
     is_emergency = (str(t.get("severity") or "").lower() == "emergency" or
                     str(t.get("uc1_state") or "") == "EMERGENCY_TRIGGERED")
-    if send_wa and not is_emergency and role in ("team_leader", "manager") and rec.get("mobile"):
+    # Only send alert here if not already sent by _escalate
+    already_sent = q("SELECT 1 FROM whatsapp_messages WHERE ticket_id=? AND recipient_role=? LIMIT 1", (tid, role), one=True)
+    if not already_sent and send_wa and not is_emergency and role in ("team_leader", "manager") and rec.get("mobile"):
         send_whatsapp_alert(t, role, rec, call_cid=cid)
 
     try:
@@ -536,8 +538,8 @@ def _place_call(t, role, attempt, workflow, send_wa=True):
     return cid
 
 
-def send_whatsapp_alert(t, role, rec, call_cid=None, alert_type_override=None, custom_note=None, delay_sec=None):
-    """Send WhatsApp alert to Team Leader or Manager."""
+def send_sms_alert(t, role, rec, call_cid=None, alert_type_override=None, custom_note=None, delay_sec=None):
+    """Send SMS alert via Twilio to Team Leader, Manager, or Technician (replacing WhatsApp)."""
     if not rec or not rec.get("mobile"):
         return
     tid = t["ticket_id"]
@@ -550,76 +552,55 @@ def send_whatsapp_alert(t, role, rec, call_cid=None, alert_type_override=None, c
     if custom_note:
         tech_line = custom_note
     elif is_emergency:
-        tech_line = f"Technician: {tech_name}"
+        tech_line = f"Tech: {tech_name}"
     else:
-        tech_line = f"Technician: {tech_name} (Unanswered after technician calls)"
-    desc = str(t.get('description') or 'N/A').replace('\\n', '\n').strip()
-    msg = (
-        f"FLM {alert_type} Alert ({role_title})\n\n"
-        f"Ticket: {tid}\n"
-        f"Site: {t.get('site_name') or 'N/A'}\n"
-        f"Severity: {t.get('severity') or ('Emergency' if is_emergency else 'Critical')}\n"
-        f"Issue: {desc}\n"
-        f"{tech_line}\n\n"
-        f"Please review and take action."
-    )
+        tech_line = f"Tech: {tech_name} (Unanswered)"
 
-    wait_time = delay_sec if delay_sec is not None else (2.0 if role == "manager" else 0.0)
-
+    desc = str(t.get('description') or 'N/A').replace('\n', ' ').strip()
     site_name = t.get("site_name") or t.get("site_number") or "Site N/A"
     attempt_no = str(t.get("esc_detail") or (1 if is_emergency else 2))
     reason = t.get("esc_reason") or ("emergency" if is_emergency else "no_acknowledgement")
     reject_reason_text = t.get("uc1_reject_reason") or "Declined assignment"
 
+    if reason == "rejected":
+        sms_body = (
+            f"FLM Alert ({role_title}): Ticket {tid} at {site_name}. "
+            f"Technician {tech_name} REJECTED assignment. Reason: {reject_reason_text}. "
+            f"Issue: {desc}. Immediate action required."
+        )
+    elif is_emergency:
+        sms_body = (
+            f"FLM EMERGENCY Alert ({role_title}): Ticket {tid} at {site_name}. "
+            f"Severity: Emergency. Issue: {desc}. "
+            f"{tech_line}. Immediate action required."
+        )
+    else:
+        sms_body = (
+            f"FLM Escalation Alert ({role_title}): Ticket {tid} at {site_name}. "
+            f"{tech_line}. Issue: {desc}. Immediate action required."
+        )
+
+    wait_time = delay_sec if delay_sec is not None else (2.0 if role == "manager" else 0.0)
     submitted_time = now_iso()
+
     def _do_send():
         if wait_time > 0:
             time.sleep(wait_time)
-        status_code = None
-        resp_body = None
-        used_template = "shabakkat_explicitrejection" if reason == "rejected" else "shabakkat_noanswer"
+        sms_sid = None
+        deliv_status = "failed"
+        fail_reason = None
         try:
-            # Use WhatsApp template if reason is explicit rejection or no answer
-            if reason == "rejected":
-                status_code, resp_body = ae_whatsapp.send_explicit_rejection_alert(
-                    rec["mobile"], tid, site_name, tech_name, reject_reason_text, attempt_no
-                )
-            else:
-                status_code, resp_body = ae_whatsapp.send_no_answer_alert(
-                    rec["mobile"], tid, site_name, tech_name, attempt_no
-                )
-            if status_code >= 400:
-                print(f"[whatsapp] Template returned {status_code}, falling back to text...", flush=True)
-                status_code, resp_body = ae_whatsapp.send_whatsapp(rec["mobile"], msg)
-                used_template = "free_text"
-            print(f"[whatsapp] WhatsApp message sent to {display_name} ({rec['mobile']}) - Status: {status_code}", flush=True)
-            audit(tid, "whatsapp_sent", f"{role_title} {alert_type.lower()} WhatsApp message sent to {display_name} ({rec['mobile']})", call_id=call_cid)
+            sms_sid = twilio_client.send_sms(rec["mobile"], sms_body)
+            deliv_status = "sent"
+            print(f"[sms] Twilio SMS sent to {display_name} ({rec['mobile']}) - SID: {sms_sid}", flush=True)
+            audit(tid, "sms_sent", f"{role_title} {alert_type.lower()} SMS sent to {display_name} ({rec['mobile']}) - SID: {sms_sid}", call_id=call_cid)
         except Exception as ex:  # noqa: BLE001
-            try:
-                status_code, resp_body = ae_whatsapp.send_whatsapp(rec["mobile"], msg)
-                used_template = "free_text"
-                print(f"[whatsapp] Fallback text message sent to {display_name} ({rec['mobile']}) - Status: {status_code}", flush=True)
-                audit(tid, "whatsapp_sent", f"{role_title} {alert_type.lower()} WhatsApp text fallback sent to {display_name} ({rec['mobile']})", call_id=call_cid)
-            except Exception as ex2:
-                status_code = 500
-                resp_body = str(ex2)
-                print(f"[whatsapp] Failed to send whatsapp message to {display_name} ({rec['mobile']}): {ex2}", flush=True)
-                audit(tid, "whatsapp_error", f"Could not send WhatsApp message to {role_title} ({display_name}): {ex2}", call_id=call_cid)
+            fail_reason = str(ex)
+            print(f"[sms] Failed to send SMS to {display_name} ({rec['mobile']}): {ex}", flush=True)
+            audit(tid, "sms_error", f"Could not send SMS to {role_title} ({display_name}): {ex}", call_id=call_cid)
 
-        # Parse provider_message_id (wamid) from 360dialog response
-        p_msg_id = None
-        if resp_body:
-            try:
-                data = json.loads(resp_body) if isinstance(resp_body, str) else resp_body
-                if isinstance(data, dict) and isinstance(data.get("messages"), list) and len(data["messages"]) > 0:
-                    p_msg_id = data["messages"][0].get("id")
-            except Exception:
-                pass
-
-        # Record message record for DB and API responses
+        # Record message in database for timeline and audit inspection
         w_id = f"WF-{tid}-{t.get('assignment_id') or 'A1'}"
-        deliv_status = "sent" if (status_code and status_code < 400) else "failed"
-        fail_reason = None if deliv_status == "sent" else (str(resp_body)[:250] if resp_body else f"HTTP {status_code}")
         record_whatsapp_message(
             workflow_id=w_id,
             ticket_id=tid,
@@ -628,9 +609,9 @@ def send_whatsapp_alert(t, role, rec, call_cid=None, alert_type_override=None, c
             recipient_id=rec.get("id") or "",
             recipient_name=rec.get("name") or display_name,
             mobile_number=rec["mobile"],
-            message_type=f"{alert_type} Alert",
-            provider_message_id=p_msg_id,
-            template_name=used_template,
+            message_type=f"{alert_type} SMS Alert",
+            provider_message_id=sms_sid,
+            template_name="sms_alert",
             template_version="v1",
             delivery_status=deliv_status,
             submitted_at=submitted_time,
@@ -643,8 +624,8 @@ def send_whatsapp_alert(t, role, rec, call_cid=None, alert_type_override=None, c
                 "workflow_id": w_id, "ticket_id": tid, "assignment_id": t.get("assignment_id"),
                 "recipient_role": role, "recipient_id": rec.get("id") or "",
                 "recipient_name": rec.get("name") or display_name, "mobile_number": rec["mobile"],
-                "message_type": f"{alert_type} Alert", "provider_message_id": p_msg_id,
-                "template_name": used_template, "template_version": "v1",
+                "message_type": f"{alert_type} SMS Alert", "provider_message_id": sms_sid,
+                "template_name": "sms_alert", "template_version": "v1",
                 "delivery_status": deliv_status, "submitted_at": submitted_time,
                 "sent_at": now_iso(), "failure_reason": fail_reason
             })
@@ -657,24 +638,19 @@ def send_whatsapp_alert(t, role, rec, call_cid=None, alert_type_override=None, c
     ).start()
 
 
-def send_whatsapp_closure(t, role, rec, resolution=None, closed_at=None, delay_sec=None):
-    """Send Emergency Closure WhatsApp notification to Team Leader, Manager, or Technician."""
+def send_sms_closure(t, role, rec, resolution=None, closed_at=None, delay_sec=None):
+    """Send Emergency Closure SMS notification via Twilio (replacing WhatsApp)."""
     if not rec or not rec.get("mobile"):
         return
     tid = t["ticket_id"]
     role_title = role.replace("_", " ").title()
     display_name = rec.get("name") or role_title
-    res = str(resolution or "Emergency issue resolved and service restored.").replace('\\n', '\n').strip()
+    res = str(resolution or "Emergency issue resolved and service restored.").replace('\n', ' ').strip()
     close_time = closed_at or now_iso()
-    msg = (
-        f"FLM Emergency Closure Alert ({role_title})\n\n"
-        f"Ticket: {tid}\n"
-        f"Site: {t.get('site_name') or 'N/A'}\n"
-        f"Severity: Emergency\n"
-        f"Status: Closed\n"
-        f"Closed At: {close_time}\n"
-        f"Resolution: {res}\n\n"
-        f"The emergency ticket has been closed. No further action is required."
+    sms_body = (
+        f"FLM Emergency Closure ({role_title}): Ticket {tid} at {t.get('site_name') or 'N/A'}. "
+        f"Status: Closed at {close_time}. Resolution: {res}. "
+        f"Ticket closed. No action required."
     )
     wait_time = delay_sec if delay_sec is not None else (2.0 if role == "manager" else 0.0)
 
@@ -682,18 +658,21 @@ def send_whatsapp_closure(t, role, rec, resolution=None, closed_at=None, delay_s
         if wait_time > 0:
             time.sleep(wait_time)
         try:
-            status_code, resp_body = ae_whatsapp.send_whatsapp(rec["mobile"], msg)
-            print(f"[whatsapp] whatsapp closure message send to {display_name} ({rec['mobile']}) - Status: {status_code}", flush=True)
-            audit(tid, "whatsapp_sent", f"{role_title} emergency closure WhatsApp message sent to {display_name} ({rec['mobile']})")
+            sms_sid = twilio_client.send_sms(rec["mobile"], sms_body)
+            print(f"[sms] Emergency closure SMS sent to {display_name} ({rec['mobile']}) - SID: {sms_sid}", flush=True)
+            audit(tid, "sms_sent", f"{role_title} emergency closure SMS sent to {display_name} ({rec['mobile']}) - SID: {sms_sid}")
         except Exception as ex:  # noqa: BLE001
-            print(f"[whatsapp] Failed to send whatsapp closure message to {display_name} ({rec['mobile']}): {ex}", flush=True)
-            audit(tid, "whatsapp_error", f"Could not send closure WhatsApp to {role_title} ({display_name}): {ex}")
+            print(f"[sms] Failed to send closure SMS to {display_name} ({rec['mobile']}): {ex}", flush=True)
+            audit(tid, "sms_error", f"Could not send closure SMS to {role_title} ({display_name}): {ex}")
 
     threading.Thread(
         target=_do_send,
         daemon=True
     ).start()
 
+
+send_whatsapp_alert = send_sms_alert
+send_whatsapp_closure = send_sms_closure
 
 def trigger_emergency(ticket_id, alarm_id, assignment_id, site_name, description, severity,
                       recipients, callback_url=None, ack_digit="1", reject_digit="9"):
@@ -766,7 +745,8 @@ def trigger_emergency(ticket_id, alarm_id, assignment_id, site_name, description
                 "severity": severity or "Emergency",
                 "status": "EMERGENCY_TRIGGERED",
                 "calls_placed": calls_placed,
-                "whatsapp_notifications": wa_recipients,
+                "sms_notifications": wa_recipients,
+            "whatsapp_notifications": wa_recipients,
                 "recipients": merged,
             })
 
@@ -775,6 +755,7 @@ def trigger_emergency(ticket_id, alarm_id, assignment_id, site_name, description
             "result": "emergency_triggered",
             "severity": severity or "Emergency",
             "calls_placed": calls_placed,
+            "sms_notifications": wa_recipients,
             "whatsapp_notifications": wa_recipients,
             "callback_url": t.get("callback_url"),
             "status_url": f"/api/tickets/{ticket_id}"
@@ -843,7 +824,8 @@ def trigger_emergency_close(ticket_id, resolution=None, closed_at=None, recipien
                 "status": "Closed",
                 "closed_at": close_time,
                 "resolution": res,
-                "whatsapp_notifications": wa_recipients
+                "sms_notifications": wa_recipients,
+            "whatsapp_notifications": wa_recipients
             })
 
         return 200, {
@@ -852,6 +834,7 @@ def trigger_emergency_close(ticket_id, resolution=None, closed_at=None, recipien
             "status": "Closed",
             "closed_at": close_time,
             "resolution": res,
+            "sms_notifications": wa_recipients,
             "whatsapp_notifications": wa_recipients,
             "status_url": f"/api/tickets/{ticket_id}"
         }
@@ -1205,6 +1188,7 @@ def ticket_view(tid):
         "followup": {"state": t["followup_state"], "due_at": t["followup_due_at"]},
         "pending_timers": timers,
         "calls": calls,
+        "sms_messages": get_whatsapp_messages(t["ticket_id"]),
         "whatsapp_messages": get_whatsapp_messages(t["ticket_id"]),
         "created_at": t["created_at"], "updated_at": t["updated_at"],
     }
@@ -1938,3 +1922,425 @@ def get_alerts_view(payload=None):
         "results": results
     }
 
+
+
+
+def handle_push_records(payload):
+    """Handles POST /api/pushrecords for pushing ticket/task records into DB (PostgreSQL & SQLite).
+    Strictly validates all 17 Required fields specified in table (1).tsv:
+    1. task_id (Required)
+    2. issue_description (Required)
+    3. issue_type (Required)
+    4. severity (Required)
+    5. task_status (Required)
+    6. alarm_status (Required)
+    7. site_number (Required)
+    8. created_date (Required)
+    9. technician_name (Required)
+    10. technician_mobile (Required)
+    11. technician_preferred_lang (Required)
+    12. teamleader_name (Required)
+    13. teamleader_mobile (Required)
+    14. teamleader_preferred_lang (Required)
+    15. manager_name (Required)
+    16. manager_mobile (Required)
+    17. manager_preferred_lang (Required)
+    """
+    if isinstance(payload, dict):
+        if "tickets" in payload:
+            raw = payload["tickets"]
+            items = raw if isinstance(raw, list) else [raw]
+            is_batch = isinstance(raw, list)
+        elif "alerts" in payload:
+            raw = payload["alerts"]
+            items = raw if isinstance(raw, list) else [raw]
+            is_batch = isinstance(raw, list)
+        else:
+            items = [payload]
+            is_batch = False
+    elif isinstance(payload, list):
+        items = payload
+        is_batch = True
+    else:
+        return 400, {
+            "status": "error",
+            "error": "Request body must be a JSON object with 'tickets' array or a single ticket object."
+        }
+
+    if not items:
+        return 400, {
+            "status": "error",
+            "error": "No tickets provided in request body."
+        }
+
+    REQUIRED_PUSH_FIELDS = [
+        ("task_id", ["task_id", "ticket_id"]),
+        ("issue_description", ["issue_description", "description"]),
+        ("issue_type", ["issue_type", "alarm_type"]),
+        ("severity", ["severity"]),
+        ("task_status", ["task_status", "ticket_status", "status"]),
+        ("alarm_status", ["alarm_status"]),
+        ("site_number", ["site_number", "site_id", "branch_id"]),
+        ("created_date", ["created_date", "created_at", "event_timestamp"]),
+        ("technician_name", ["technician_name"]),
+        ("technician_mobile", ["technician_mobile", "phone_number"]),
+        ("technician_preferred_lang", ["technician_preferred_lang", "technician_language"]),
+        ("teamleader_name", ["teamleader_name", "team_leader_name"]),
+        ("teamleader_mobile", ["teamleader_mobile", "team_leader_mobile"]),
+        ("teamleader_preferred_lang", ["teamleader_preferred_lang", "team_leader_preferred_lang", "team_leader_language"]),
+        ("manager_name", ["manager_name"]),
+        ("manager_mobile", ["manager_mobile"]),
+        ("manager_preferred_lang", ["manager_preferred_lang", "manager_language"]),
+    ]
+
+    results = []
+    valid_items = []
+    success_count = 0
+    fail_count = 0
+    current_time = now_iso()
+
+    for idx, item in enumerate(items):
+        if not isinstance(item, dict):
+            fail_count += 1
+            results.append({
+                "index": idx,
+                "status": "failed",
+                "error": "Ticket item must be a JSON object"
+            })
+            continue
+
+        # Validate all 17 required fields according to table (1).tsv
+        missing_fields = []
+        extracted = {}
+        for canon, aliases in REQUIRED_PUSH_FIELDS:
+            val = ""
+            for k in aliases:
+                if k in item and item[k] is not None and str(item[k]).strip() != "":
+                    val = str(item[k]).strip()
+                    break
+            if not val:
+                missing_fields.append(canon)
+            else:
+                extracted[canon] = val
+
+        tid = extracted.get("task_id") or ""
+        if missing_fields:
+            fail_count += 1
+            results.append({
+                "index": idx,
+                "task_id": tid or f"item_{idx}",
+                "status": "failed",
+                "error": f"Missing required field(s): {', '.join(missing_fields)}"
+            })
+            continue
+
+        alarm_id = str(item.get("alarm_id") or extracted["issue_type"] or f"ALM-{tid}").strip()
+        alert_id = str(item.get("alert_id") or tid).strip()
+        site_num = extracted["site_number"]
+        site_name = str(item.get("site_name") or f"Site {site_num}").strip()
+        issue_desc = extracted["issue_description"]
+        alarm_type = extracted["issue_type"]
+        severity = extracted["severity"]
+        ticket_status = extracted["task_status"]
+        alarm_status = extracted["alarm_status"]
+        created_date = extracted["created_date"]
+        aid = str(item.get("assignment_id") or f"{tid}-ASN1").strip()
+
+        tech_lang = _normalize_lang(extracted["technician_preferred_lang"], default="en")
+        tl_lang = _normalize_lang(extracted["teamleader_preferred_lang"], default="ar")
+        mgr_lang = _normalize_lang(extracted["manager_preferred_lang"], default="en")
+
+        recipients = {
+            "technician": {
+                "name": extracted["technician_name"],
+                "mobile": _format_e164(extracted["technician_mobile"]),
+                "language": tech_lang
+            },
+            "team_leader": {
+                "name": extracted["teamleader_name"],
+                "mobile": _format_e164(extracted["teamleader_mobile"]),
+                "language": tl_lang
+            },
+            "manager": {
+                "name": extracted["manager_name"],
+                "mobile": _format_e164(extracted["manager_mobile"]),
+                "language": mgr_lang
+            }
+        }
+        recip_json = json.dumps(recipients, ensure_ascii=False)
+
+        try:
+            with ticket_lock(tid):
+                existing = get_ticket(tid)
+                if not existing:
+                    q("""INSERT INTO tickets (
+                        ticket_id, alert_id, alarm_id, assignment_id, site_number,
+                        site_name, severity, status, alarm_status, description,
+                        recipients, uc1_assignment_id, uc1_state, created_at, updated_at
+                    ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                      (tid, alert_id, alarm_id, aid, site_num,
+                       site_name, severity, ticket_status, alarm_status, issue_desc,
+                       recip_json, aid, "ASSIGNED", created_date, current_time))
+                else:
+                    q("""UPDATE tickets SET
+                        alert_id=?, alarm_id=?, assignment_id=?, site_number=?,
+                        site_name=?, severity=?, status=?, alarm_status=?,
+                        description=?, recipients=?, uc1_assignment_id=?,
+                        uc1_state=COALESCE(uc1_state, 'ASSIGNED'), updated_at=?
+                        WHERE ticket_id=?""",
+                      (alert_id, alarm_id, aid, site_num,
+                       site_name, severity, ticket_status, alarm_status,
+                       issue_desc, recip_json, aid, current_time, tid))
+
+                evt_id = f"EVT-PUSH-{int(time.time()*1000)}-{tid}"
+                q("""INSERT OR REPLACE INTO events (
+                    event_id, ticket_id, event_type, version, event_time,
+                    received_at, result, note, payload
+                ) VALUES (?,?,?,?,?,?,?,?,?)""",
+                  (evt_id, tid, "RECORD_PUSHED", 1, created_date,
+                   current_time, "stored", f"Pushed record for {tid}", json.dumps(item, ensure_ascii=False)))
+
+                audit(tid, "record_pushed", f"Ticket {tid} ({issue_desc}) stored via /api/pushrecords", event_id=evt_id)
+
+            success_count += 1
+            valid_items.append(item)
+            results.append({
+                "index": idx,
+                "task_id": tid,
+                "ticket_id": tid,
+                "status": "stored",
+                "site_number": site_num,
+                "severity": severity,
+                "technician": f"{extracted['technician_name']} ({recipients['technician']['mobile']})"
+            })
+        except Exception as e:
+            fail_count += 1
+            results.append({
+                "index": idx,
+                "task_id": tid,
+                "ticket_id": tid,
+                "status": "failed",
+                "error": str(e)
+            })
+
+    # Persist valid items to PostgreSQL
+    if valid_items:
+        try:
+            import pg_store
+            pg_store.save_pushed_records(valid_items)
+        except Exception as e:
+            logger.warning(f"PostgreSQL push records notice: {e}")
+
+    resp = {
+        "status": "success" if fail_count == 0 else ("partial" if success_count > 0 else "error"),
+        "message": f"Processed {len(items)} record(s): {success_count} stored successfully, {fail_count} failed",
+        "records_count": len(items),
+        "success_count": success_count,
+        "failed_count": fail_count,
+        "tickets": results if is_batch else results[0]
+    }
+    http_code = 200 if fail_count == 0 else (207 if success_count > 0 else 400)
+    return http_code, resp
+
+
+def handle_update_records(payload):
+    """Handles POST /api/updaterecords strictly based on table (1).tsv:
+    - task_id (Required)
+    - update_type (Required) e.g. 'REASSIGNMENT', 'STATUS_UPDATE'
+    - severity (Optional)
+    - task_status (Optional, e.g. 'Departed', 'Closed')
+    - alarm_status (Optional, e.g. 'Cleared')
+    - technician_name (Required for reassignment)
+    - technician_mobile (Required for reassignment)
+    - technician_preferred_lang (Required for reassignment)
+    - teamleader_name, teamleader_mobile, teamleader_preferred_lang (Optional for reassignment)
+    - manager_name, manager_mobile, manager_preferred_lang (Optional for reassignment)
+    """
+    if isinstance(payload, dict):
+        if "updates" in payload:
+            raw = payload["updates"]
+            items = raw if isinstance(raw, list) else [raw]
+            is_batch = isinstance(raw, list)
+        elif "tickets" in payload:
+            raw = payload["tickets"]
+            items = raw if isinstance(raw, list) else [raw]
+            is_batch = isinstance(raw, list)
+        else:
+            items = [payload]
+            is_batch = False
+    elif isinstance(payload, list):
+        items = payload
+        is_batch = True
+    else:
+        return 400, {
+            "status": "error",
+            "error": "Request body must be a JSON object with 'updates' array or a single update object."
+        }
+
+    results = []
+    valid_items = []
+    success_count = 0
+    fail_count = 0
+    current_time = now_iso()
+
+    for idx, item in enumerate(items):
+        if not isinstance(item, dict):
+            fail_count += 1
+            results.append({"index": idx, "status": "failed", "error": "Item must be a JSON object"})
+            continue
+
+        tid = str(item.get("task_id") or item.get("ticket_id") or "").strip().upper()
+        if not tid:
+            fail_count += 1
+            results.append({"index": idx, "status": "failed", "error": "Missing required field: task_id"})
+            continue
+
+        raw_update_type = str(item.get("update_type") or "").strip()
+        update_type = raw_update_type.upper()
+        if not update_type:
+            fail_count += 1
+            results.append({"index": idx, "task_id": tid, "status": "failed", "error": "Missing required field: update_type"})
+            continue
+
+        t = get_ticket(tid)
+        if not t:
+            fail_count += 1
+            results.append({"index": idx, "task_id": tid, "status": "failed", "error": f"Ticket {tid} not found in database"})
+            continue
+
+        task_status = str(item.get("task_status") or item.get("ticket_status") or item.get("status") or "").strip()
+        alarm_status = str(item.get("alarm_status") or "").strip()
+        severity = str(item.get("severity") or "").strip()
+
+        # Handle reassignment
+        if update_type in ("REASSIGNMENT", "REASSIGN"):
+            missing_reassign = []
+            tech_name = str(item.get("technician_name") or "").strip()
+            tech_mob = str(item.get("technician_mobile") or item.get("phone_number") or "").strip()
+            tech_lang = str(item.get("technician_preferred_lang") or item.get("technician_language") or "").strip()
+
+            if not tech_name: missing_reassign.append("technician_name")
+            if not tech_mob: missing_reassign.append("technician_mobile")
+            if not tech_lang: missing_reassign.append("technician_preferred_lang")
+
+            if missing_reassign:
+                fail_count += 1
+                results.append({
+                    "index": idx,
+                    "task_id": tid,
+                    "update_type": raw_update_type,
+                    "status": "failed",
+                    "error": f"Reassignment missing required field(s): {', '.join(missing_reassign)}"
+                })
+                continue
+
+            recipients = dict(t.get("recipients") or {})
+            recipients["technician"] = {
+                "name": tech_name,
+                "mobile": _format_e164(tech_mob),
+                "language": _normalize_lang(tech_lang, default="en")
+            }
+            if item.get("teamleader_mobile"):
+                recipients["team_leader"] = {
+                    "name": str(item.get("teamleader_name") or "").strip(),
+                    "mobile": _format_e164(str(item.get("teamleader_mobile")).strip()),
+                    "language": _normalize_lang(item.get("teamleader_preferred_lang"), default="ar")
+                }
+            if item.get("manager_mobile"):
+                recipients["manager"] = {
+                    "name": str(item.get("manager_name") or "").strip(),
+                    "mobile": _format_e164(str(item.get("manager_mobile")).strip()),
+                    "language": _normalize_lang(item.get("manager_preferred_lang"), default="en")
+                }
+
+            new_aid = f"{tid}-ASN{int(time.time()*1000)%10000}"
+            update_fields = {
+                "assignment_id": new_aid,
+                "uc1_assignment_id": new_aid,
+                "recipients": json.dumps(recipients, ensure_ascii=False),
+                "status": task_status or "Reassigned",
+                "updated_at": current_time
+            }
+            if severity: update_fields["severity"] = severity
+            if alarm_status: update_fields["alarm_status"] = alarm_status
+
+            set_clause = ", ".join(f"{k}=?" for k in update_fields.keys())
+            q(f"UPDATE tickets SET {set_clause} WHERE ticket_id=?", (*update_fields.values(), tid))
+
+            evt_id = f"EVT-REASSIGN-{int(time.time()*1000)}-{tid}"
+            q("""INSERT OR REPLACE INTO events (event_id, ticket_id, event_type, version, event_time, received_at, result, note, payload)
+                 VALUES (?,?,?,?,?,?,?,?,?)""",
+              (evt_id, tid, "ASSIGNMENT_REASSIGNED", 1, current_time, current_time, "stored",
+               f"Ticket {tid} reassigned to technician {tech_name}", json.dumps(item, ensure_ascii=False)))
+            audit(tid, "reassigned", f"Ticket {tid} reassigned to technician {tech_name} ({tech_mob})", event_id=evt_id)
+
+            success_count += 1
+            valid_items.append(item)
+            res_item = {
+                "index": idx,
+                "task_id": tid,
+                "update_type": raw_update_type,
+                "status": "updated",
+                "new_assignment_id": new_aid,
+                "technician": f"{tech_name} ({_format_e164(tech_mob)})"
+            }
+            if task_status: res_item["task_status"] = task_status
+            if alarm_status: res_item["alarm_status"] = alarm_status
+            results.append(res_item)
+
+        else:
+            # STATUS_UPDATE / SEVERITY_UPDATE / etc.
+            update_fields = {"updated_at": current_time}
+            if task_status: update_fields["status"] = task_status
+            if alarm_status: update_fields["alarm_status"] = alarm_status
+            if severity: update_fields["severity"] = severity
+
+            # If closed, stop jobs
+            if task_status.lower() in ("closed", "resolved"):
+                _cancel_jobs(tid, ("tech_call", "tl_call", "manager_call", "followup"), f"ticket closed via {update_type}")
+                _end_live_calls(tid, f"ticket closed via {update_type}")
+                update_fields["uc1_state"] = "CANCELLED_CLOSED"
+
+            if len(update_fields) > 1:
+                set_clause = ", ".join(f"{k}=?" for k in update_fields.keys())
+                q(f"UPDATE tickets SET {set_clause} WHERE ticket_id=?", (*update_fields.values(), tid))
+
+            evt_id = f"EVT-UPD-{int(time.time()*1000)}-{tid}"
+            q("""INSERT OR REPLACE INTO events (event_id, ticket_id, event_type, version, event_time, received_at, result, note, payload)
+                 VALUES (?,?,?,?,?,?,?,?,?)""",
+              (evt_id, tid, update_type, 1, current_time, current_time, "stored",
+               f"Ticket {tid} updated: {update_type}", json.dumps(item, ensure_ascii=False)))
+            audit(tid, "record_updated", f"Ticket {tid} updated: {update_type} (status={task_status or t['status']})", event_id=evt_id)
+
+            success_count += 1
+            valid_items.append(item)
+            res_item = {
+                "index": idx,
+                "task_id": tid,
+                "update_type": raw_update_type,
+                "status": "updated"
+            }
+            if task_status: res_item["task_status"] = task_status
+            if alarm_status: res_item["alarm_status"] = alarm_status
+            if severity: res_item["severity"] = severity
+            results.append(res_item)
+
+    # Persist updates to PostgreSQL
+    if valid_items:
+        try:
+            import pg_store
+            pg_store.save_updated_records(valid_items)
+        except Exception as e:
+            logger.warning(f"PostgreSQL update records notice: {e}")
+
+    resp = {
+        "status": "success" if fail_count == 0 else ("partial" if success_count > 0 else "error"),
+        "message": f"Processed {len(items)} update(s): {success_count} updated successfully, {fail_count} failed",
+        "records_count": len(items),
+        "success_count": success_count,
+        "failed_count": fail_count,
+        "updates": results if is_batch else results[0],
+        "tickets": results if is_batch else results[0]
+    }
+    http_code = 200 if fail_count == 0 else (207 if success_count > 0 else 400)
+    return http_code, resp

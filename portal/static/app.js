@@ -391,7 +391,7 @@ clearBtn.addEventListener('click', async () => {
   }
 });
 
-downloadBtn.addEventListener('click', () => {
+if (downloadBtn) downloadBtn.addEventListener('click', () => {
   const filtered = state.logs.filter(entryMatchesFilter);
   const textContent = filtered.map((l, i) => `[${l.timestamp || ''}] [${(l.level || 'INFO')}] ${l.message || ''}`).join('\n');
   const blob = new Blob([textContent], { type: 'text/plain;charset=utf-8' });

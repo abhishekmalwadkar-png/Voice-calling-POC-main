@@ -1,4 +1,4 @@
-# NextAsk Gateway API Documentation
+# NexTask Gateway API Documentation
 
 **Base URL:** `https://nextaskgw.automationedge.com`  
 **Authentication Scheme:** `Basic Auth` (to generate API key) & `X-API-Key` (for platform endpoints)
@@ -25,16 +25,16 @@
 sequenceDiagram
     autonumber
     actor Client as Client / Integration / Postman
-    participant Gateway as NextAsk Gateway (https://nextaskgw.automationedge.com)
+    participant Gateway as NexTask Gateway (https://nextaskgw.automationedge.com)
     participant Twilio as Twilio Voice Service
     participant Engineer as Technician / Team Leader / Manager
 
     Note over Client,Gateway: Step 1: Obtain API Key
-    Client->>Gateway: POST /api/authorize (Basic Auth: <USERNAME> / <PASSWORD>)
+    Client->>Gateway: POST /api/authorize (Basic Auth: admin / admin123)
     Gateway-->>Client: 200 OK (Returns x_api_key)
 
     Note over Client,Gateway: Step 2: Trigger Alert Voice Calls
-    Client->>Gateway: POST /api/alerts (Header: X-API-Key: <YOUR_API_KEY>, Body: Batch Alert JSON)
+    Client->>Gateway: POST /api/alerts (Header: X-API-Key: <dynamic_api_key_from_authorize>, Body: Batch Alert JSON)
     Gateway->>Twilio: Initiate Outbound Call
     Gateway-->>Client: 200 OK (accepted, scheduled calls with event_id & event_timestamp)
 
@@ -44,7 +44,7 @@ sequenceDiagram
     Twilio->>Gateway: POST /twilio/call-status (Record response)
 
     Note over Client,Gateway: Step 4: Check Batch Status
-    Client->>Gateway: GET /api/getalerts (Header: X-API-Key: <YOUR_API_KEY>)
+    Client->>Gateway: GET /api/getalerts (Header: X-API-Key: <dynamic_api_key_from_authorize>)
     Gateway-->>Client: 200 OK (dtmf_pressed, acknowledged: true)
 ```
 
@@ -56,7 +56,7 @@ Authenticates admin credentials and returns the active API Key required for all 
 
 * **Endpoint:** `/api/authorize`
 * **Method:** `POST` or `GET`
-* **Authentication:** **Basic Auth** (`<USERNAME>` / `<PASSWORD>`) or JSON Body (`{"username": "<USERNAME>", "password": "<PASSWORD>"}`)
+* **Authentication:** **Basic Auth** (`admin` / `admin123`) or JSON Body (`{"username": "admin", "password": "admin123"}`)
 
 ### Request Headers
 | Header | Value | Required |
@@ -67,8 +67,8 @@ Authenticates admin credentials and returns the active API Key required for all 
 ### Request Body (Optional if using Basic Auth)
 ```json
 {
-  "username": "<YOUR_USERNAME>",
-  "password": "<YOUR_PASSWORD>"
+  "username": "admin",
+  "password": "admin123"
 }
 ```
 
@@ -79,13 +79,13 @@ Authenticates admin credentials and returns the active API Key required for all 
   "authorized": true,
   "http_code": 200,
   "message": "User authenticated successfully. Use the provided api_key in the headers of other APIs.",
-  "api_key": "<YOUR_API_KEY>",
-  "x_api_key": "<YOUR_API_KEY>",
+  "api_key": "<dynamic_api_key_from_authorize>",
+  "x_api_key": "<dynamic_api_key_from_authorize>",
   "token": "<SESSION_BEARER_TOKEN>",
   "token_type": "Bearer",
   "expires_in": 86400,
   "user": {
-    "username": "<YOUR_USERNAME>",
+    "username": "admin",
     "role": "admin",
     "auth_type": "credentials"
   }
@@ -127,8 +127,8 @@ Standard JWT-style authentication endpoint that issues a bearer session token.
 ### Request Body
 ```json
 {
-  "username": "<YOUR_USERNAME>",
-  "password": "<YOUR_PASSWORD>"
+  "username": "admin",
+  "password": "admin123"
 }
 ```
 
@@ -140,11 +140,11 @@ Standard JWT-style authentication endpoint that issues a bearer session token.
   "token": "<SESSION_BEARER_TOKEN>",
   "token_type": "Bearer",
   "expires_in": 86400,
-  "api_key": "<YOUR_API_KEY>",
+  "api_key": "<dynamic_api_key_from_authorize>",
   "user": {
-    "username": "<YOUR_USERNAME>",
+    "username": "admin",
     "role": "admin",
-    "full_name": "<YOUR_USERNAME>"
+    "full_name": "admin"
   }
 }
 ```
@@ -157,12 +157,12 @@ Ingests a single ticket or an entire batch of network/power/HVAC alerts, creates
 
 * **Endpoint:** `/api/alerts` *(alias: `/api/alerts/intake`)*
 * **Method:** `POST`
-* **Authentication:** Header `X-API-Key: <YOUR_API_KEY>`
+* **Authentication:** Header `X-API-Key: <dynamic_api_key_from_authorize>`
 
 ### Request Headers
 | Header | Value | Required |
 | :--- | :--- | :--- |
-| `X-API-Key` | `<YOUR_API_KEY>` | **Yes** |
+| `X-API-Key` | `<dynamic_api_key_from_authorize>` | **Yes** |
 | `Content-Type` | `application/json` | **Yes** |
 
 ### Request Body (Batch Alert Payload)
@@ -276,11 +276,120 @@ Notice that the response includes **`event_id`** and **`event_timestamp`** at th
 
 ---
 
+## 4.1 Push Records API (`/api/alerts`)
+
+Stores single or batch ticket/task records directly into both PostgreSQL (`tb_tickets`, `tb_assignments`, `tb_nextask_events`, `tb_audit_logs`) and SQLite databases. All 17 fields from `table (1).tsv` are required.
+
+* **Endpoint:** `/api/alerts` *(aliases: `/api/pushrecords`, `/api/push_records`)*
+* **Method:** `POST` or `PUT`
+* **Authentication:** Header `X-API-Key: <dynamic_api_key_from_authorize>`
+
+### Request Body (Batch)
+```json
+{
+  "tickets": [
+    {
+      "task_id": "TASK1001",
+      "issue_description": "Network connectivity failure",
+      "issue_type": "Network Failure",
+      "severity": "Critical",
+      "task_status": "Dispatch",
+      "alarm_status": "Active",
+      "site_number": "SITE001",
+      "created_date": "2026-11-03T10:30:00+03:00",
+      "technician_name": "Ali",
+      "technician_mobile": "+966500000001",
+      "technician_preferred_lang": "English",
+      "teamleader_name": "Mohammed",
+      "teamleader_mobile": "+966500000002",
+      "teamleader_preferred_lang": "Arabic",
+      "manager_name": "Khalid",
+      "manager_mobile": "+966500000003",
+      "manager_preferred_lang": "English"
+    }
+  ]
+}
+```
+
+---
+
+## 4.2 Update Records API (`/api/alerts/update`)
+
+Updates existing ticket records for reassignments, status changes, or alarm clearance. Strictly follows `table (1).tsv`.
+
+* **Endpoint:** `/api/alerts/update` *(aliases: `/api/update`, `/api/updaterecords`)*
+* **Method:** `PUT` *(also accepts `POST`)*
+* **Authentication:** Header `X-API-Key: <dynamic_api_key_from_authorize>`
+
+### Request Body (Batch)
+```json
+{
+  "updates": [
+    {
+      "task_id": "TASK1001",
+      "update_type": "REASSIGNMENT",
+      "technician_name": "Faisal",
+      "technician_mobile": "+966500000007",
+      "technician_preferred_lang": "Arabic"
+    },
+    {
+      "task_id": "TASK1002",
+      "update_type": "STATUS_UPDATE",
+      "task_status": "Departed"
+    },
+    {
+      "task_id": "TASK1003",
+      "update_type": "STATUS_UPDATE",
+      "task_status": "Closed",
+      "alarm_status": "Cleared"
+    }
+  ]
+}
+```
+
+### Response Example (`200 OK`)
+```json
+{
+  "status": "success",
+  "message": "Processed 3 update(s): 3 updated successfully, 0 failed",
+  "records_count": 3,
+  "success_count": 3,
+  "failed_count": 0,
+  "updates": [
+    {
+      "index": 0,
+      "task_id": "TASK1001",
+      "update_type": "REASSIGNMENT",
+      "status": "updated",
+      "new_assignment_id": "TASK1001-ASN3887",
+      "technician": "Faisal (+966500000007)"
+    },
+    {
+      "index": 1,
+      "task_id": "TASK1002",
+      "update_type": "STATUS_UPDATE",
+      "status": "updated",
+      "task_status": "Departed"
+    },
+    {
+      "index": 2,
+      "task_id": "TASK1003",
+      "update_type": "STATUS_UPDATE",
+      "status": "updated",
+      "task_status": "Closed",
+      "alarm_status": "Cleared"
+    }
+  ]
+}
+```
+
+---
+
 ## 5. Payload Field Specifications & PostgreSQL Data Types
 
 ### 5.1 Additional Fields Summary
 
-The following 7 fields are additional enhancements introduced in the NextAsk Gateway batch architecture:
+The following 7 fields are additional enhancements introduced in the NexTask Gateway batch architecture:
 
 | No. | Additional field | Sample value | Purpose |
 | :---: | :--- | :--- | :--- |
@@ -329,12 +438,12 @@ Retrieves batch alert status, ticket delivery states, and DTMF interaction histo
 
 * **Endpoint:** `/api/getalerts` *(also supports `GET /api/alerts`)*
 * **Method:** `GET` *(or `POST`)*
-* **Authentication:** Header `X-API-Key: <YOUR_API_KEY>`
+* **Authentication:** Header `X-API-Key: <dynamic_api_key_from_authorize>`
 
 ### Request Headers
 | Header | Value | Required |
 | :--- | :--- | :--- |
-| `X-API-Key` | `<YOUR_API_KEY>` | **Yes** |
+| `X-API-Key` | `<dynamic_api_key_from_authorize>` | **Yes** |
 
 ### Success Response (`200 OK`)
 ```json

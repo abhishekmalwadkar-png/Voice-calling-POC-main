@@ -494,3 +494,234 @@ def save_whatsapp_message_pg(msg_dict):
         return False
     finally:
         release_connection(conn)
+
+
+def save_pushed_records(items):
+    """
+    Persists pushed ticket/task records into PostgreSQL:
+    tb_tickets, tb_assignments, tb_nextask_events, tb_audit_logs.
+    """
+    if not isinstance(items, list):
+        items = [items]
+    conn = get_connection()
+    if not conn:
+        return False
+    now_iso = datetime.now(timezone.utc).isoformat()
+    try:
+        with conn.cursor() as cur:
+            for item in items:
+                if not isinstance(item, dict):
+                    continue
+                tid = str(item.get("task_id") or item.get("ticket_id") or "").strip().upper()
+                if not tid:
+                    continue
+                alarm_id = str(item.get("alarm_id") or item.get("issue_type") or f"ALM-{tid}").strip()
+                alert_id = str(item.get("alert_id") or tid).strip()
+                site_num = str(item.get("site_number") or "").strip()
+                site_name = str(item.get("site_name") or (f"Site {site_num}" if site_num else "Main Site")).strip()
+                issue_desc = str(item.get("issue_description") or item.get("description") or item.get("issue_type") or "Issue reported").strip()
+                alarm_type = str(item.get("issue_type") or item.get("alarm_type") or "Network/Hardware").strip()
+                severity = str(item.get("severity") or "Normal").strip()
+                ticket_status = str(item.get("task_status") or item.get("ticket_status") or item.get("status") or "Dispatch").strip()
+                alarm_status = str(item.get("alarm_status") or "Active").strip()
+                created_date = str(item.get("created_date") or item.get("created_at") or now_iso).strip()
+                aid = str(item.get("assignment_id") or f"{tid}-ASN1").strip()
+
+                tech_name = str(item.get("technician_name") or "").strip()
+                tech_mob = str(item.get("technician_mobile") or item.get("phone_number") or "").strip()
+                tech_lang = str(item.get("technician_preferred_lang") or item.get("technician_language") or "English").strip()
+
+                tl_name = str(item.get("teamleader_name") or item.get("team_leader_name") or "").strip()
+                tl_mob = str(item.get("teamleader_mobile") or item.get("team_leader_mobile") or "").strip()
+                tl_lang = str(item.get("teamleader_preferred_lang") or item.get("team_leader_language") or "Arabic").strip()
+                tl_dict = {"name": tl_name, "mobile": tl_mob, "preferred_language": tl_lang} if tl_mob else None
+
+                mgr_name = str(item.get("manager_name") or "").strip()
+                mgr_mob = str(item.get("manager_mobile") or "").strip()
+                mgr_lang = str(item.get("manager_preferred_lang") or item.get("manager_language") or "English").strip()
+                mgr_dict = {"name": mgr_name, "mobile": mgr_mob, "preferred_language": mgr_lang} if mgr_mob else None
+
+                # 1. Upsert tb_tickets
+                cur.execute("""
+                    INSERT INTO public.tb_tickets (
+                        ticket_id, alarm_id, alert_id, site_number, site_name,
+                        issue_description, alarm_type, severity, ticket_status,
+                        alarm_status, opened_at, updated_at
+                    ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, now())
+                    ON CONFLICT (ticket_id) DO UPDATE SET
+                        alarm_id = EXCLUDED.alarm_id,
+                        alert_id = EXCLUDED.alert_id,
+                        site_number = EXCLUDED.site_number,
+                        site_name = EXCLUDED.site_name,
+                        issue_description = EXCLUDED.issue_description,
+                        alarm_type = EXCLUDED.alarm_type,
+                        severity = EXCLUDED.severity,
+                        ticket_status = EXCLUDED.ticket_status,
+                        alarm_status = EXCLUDED.alarm_status,
+                        updated_at = now();
+                """, (tid, alarm_id, alert_id, site_num, site_name, issue_desc, alarm_type, severity, ticket_status, alarm_status, created_date))
+
+                # 2. Upsert tb_assignments
+                cur.execute("""
+                    INSERT INTO public.tb_assignments (
+                        assignment_id, ticket_id, technician_name, technician_mobile,
+                        preferred_language, team_leader_details, manager_details,
+                        assignment_type, assignment_status, assigned_at
+                    ) VALUES (%s, %s, %s, %s, %s, %s, %s, 'INITIAL', %s, %s)
+                    ON CONFLICT (assignment_id) DO UPDATE SET
+                        technician_name = EXCLUDED.technician_name,
+                        technician_mobile = EXCLUDED.technician_mobile,
+                        preferred_language = EXCLUDED.preferred_language,
+                        team_leader_details = EXCLUDED.team_leader_details,
+                        manager_details = EXCLUDED.manager_details,
+                        assignment_status = EXCLUDED.assignment_status,
+                        assigned_at = EXCLUDED.assigned_at;
+                """, (aid, tid, tech_name, tech_mob, tech_lang, Json(tl_dict) if tl_dict else None, Json(mgr_dict) if mgr_dict else None, ticket_status, created_date))
+
+                # 3. Insert tb_nextask_events
+                evt_id = f"EVT-PUSH-{int(datetime.now().timestamp()*1000)}-{tid}"
+                cur.execute("""
+                    INSERT INTO public.tb_nextask_events (
+                        event_id, ticket_id, assignment_id, event_type,
+                        event_version, event_timestamp, payload_json, processing_status
+                    ) VALUES (%s, %s, %s, 'RECORD_PUSHED', 1, %s, %s, 'STORED')
+                    ON CONFLICT (event_id) DO NOTHING;
+                """, (evt_id, tid, aid, created_date, Json(item)))
+
+                # 4. Insert tb_audit_logs
+                cur.execute("""
+                    INSERT INTO public.tb_audit_logs (
+                        ticket_id, assignment_id, event_id, activity_type,
+                        activity_description, activity_status, details_json
+                    ) VALUES (%s, %s, %s, 'RECORD_PUSHED', %s, 'SUCCESS', %s);
+                """, (tid, aid, evt_id, f"Ticket {tid} pushed via /api/pushrecords", Json(item)))
+
+        conn.commit()
+        return True
+    except Exception as e:
+        conn.rollback()
+        logger.error(f"Error persisting pushed records to PostgreSQL: {e}")
+        return False
+    finally:
+        release_connection(conn)
+
+
+def save_updated_records(items):
+    """
+    Persists updates (REASSIGNMENT, STATUS_UPDATE, etc.) into PostgreSQL:
+    tb_tickets, tb_assignments, tb_nextask_events, tb_audit_logs.
+    """
+    if not isinstance(items, list):
+        items = [items]
+    conn = get_connection()
+    if not conn:
+        return False
+    now_iso = datetime.now(timezone.utc).isoformat()
+    try:
+        with conn.cursor() as cur:
+            for item in items:
+                if not isinstance(item, dict):
+                    continue
+                tid = str(item.get("task_id") or item.get("ticket_id") or "").strip().upper()
+                if not tid:
+                    continue
+                update_type = str(item.get("update_type") or "STATUS_UPDATE").strip().upper()
+
+                cur.execute("SELECT current_assignment_id, ticket_status FROM public.tb_tickets WHERE ticket_id=%s", (tid,))
+                row = cur.fetchone()
+                current_aid = row[0] if row else None
+
+                task_status = str(item.get("task_status") or item.get("ticket_status") or item.get("status") or "").strip()
+                alarm_status = str(item.get("alarm_status") or "").strip()
+                severity = str(item.get("severity") or "").strip()
+
+                if update_type in ("REASSIGNMENT", "REASSIGN"):
+                    tech_name = str(item.get("technician_name") or "").strip()
+                    tech_mob = str(item.get("technician_mobile") or item.get("phone_number") or "").strip()
+                    tech_lang = str(item.get("technician_preferred_lang") or item.get("technician_language") or "English").strip()
+
+                    new_aid = str(item.get("assignment_id") or f"{tid}-ASN{int(datetime.now().timestamp()*1000)%10000}").strip()
+
+                    if current_aid:
+                        cur.execute("""
+                            UPDATE public.tb_assignments
+                            SET assignment_status = 'Replaced', ended_at = now()
+                            WHERE assignment_id = %s
+                        """, (current_aid,))
+
+                    cur.execute("""
+                        INSERT INTO public.tb_assignments (
+                            assignment_id, ticket_id, previous_assignment_id,
+                            technician_name, technician_mobile, preferred_language,
+                            assignment_type, assignment_status, assigned_at
+                        ) VALUES (%s, %s, %s, %s, %s, %s, 'REASSIGNMENT', %s, now())
+                        ON CONFLICT (assignment_id) DO UPDATE SET
+                            technician_name = EXCLUDED.technician_name,
+                            technician_mobile = EXCLUDED.technician_mobile,
+                            preferred_language = EXCLUDED.preferred_language,
+                            assignment_status = EXCLUDED.assignment_status,
+                            assigned_at = EXCLUDED.assigned_at;
+                    """, (new_aid, tid, current_aid, tech_name, tech_mob, tech_lang, task_status or "Assigned"))
+
+                    upd_fields = ["current_assignment_id = %s", "updated_at = now()"]
+                    upd_args = [new_aid]
+                    if task_status:
+                        upd_fields.append("ticket_status = %s")
+                        upd_args.append(task_status)
+                    if severity:
+                        upd_fields.append("severity = %s")
+                        upd_args.append(severity)
+                    if alarm_status:
+                        upd_fields.append("alarm_status = %s")
+                        upd_args.append(alarm_status)
+                    upd_args.append(tid)
+
+                    cur.execute(f"UPDATE public.tb_tickets SET {', '.join(upd_fields)} WHERE ticket_id=%s", tuple(upd_args))
+                    current_aid = new_aid
+
+                else:
+                    upd_fields = ["updated_at = now()"]
+                    upd_args = []
+                    if task_status:
+                        upd_fields.append("ticket_status = %s")
+                        upd_args.append(task_status)
+                        if task_status.lower() in ("closed", "resolved"):
+                            upd_fields.append("closed_at = now()")
+                    if alarm_status:
+                        upd_fields.append("alarm_status = %s")
+                        upd_args.append(alarm_status)
+                    if severity:
+                        upd_fields.append("severity = %s")
+                        upd_args.append(severity)
+
+                    if len(upd_fields) > 1:
+                        upd_args.append(tid)
+                        cur.execute(f"UPDATE public.tb_tickets SET {', '.join(upd_fields)} WHERE ticket_id=%s", tuple(upd_args))
+
+                    if current_aid and task_status:
+                        cur.execute("UPDATE public.tb_assignments SET assignment_status=%s WHERE assignment_id=%s", (task_status, current_aid))
+
+                evt_id = f"EVT-UPD-{int(datetime.now().timestamp()*1000)}-{tid}"
+                cur.execute("""
+                    INSERT INTO public.tb_nextask_events (
+                        event_id, ticket_id, assignment_id, event_type,
+                        event_version, event_timestamp, payload_json, processing_status
+                    ) VALUES (%s, %s, %s, %s, 1, %s, %s, 'STORED')
+                    ON CONFLICT (event_id) DO NOTHING;
+                """, (evt_id, tid, current_aid, update_type, now_iso, Json(item)))
+
+                cur.execute("""
+                    INSERT INTO public.tb_audit_logs (
+                        ticket_id, assignment_id, event_id, activity_type,
+                        activity_description, activity_status, details_json
+                    ) VALUES (%s, %s, %s, %s, %s, 'SUCCESS', %s);
+                """, (tid, current_aid, evt_id, update_type, f"Ticket {tid} updated: {update_type}", Json(item)))
+
+        conn.commit()
+        return True
+    except Exception as e:
+        conn.rollback()
+        logger.error(f"Error saving updated records to PostgreSQL: {e}")
+        return False
+    finally:
+        release_connection(conn)
