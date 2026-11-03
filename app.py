@@ -120,7 +120,7 @@ def _reload_modules():
     """Hot-reload modified modules into memory without restarting the server or tunnel."""
     config.load_env(override=True)
     import pg_store
-    modules = [config, texts, ae_whatsapp, queries, workflow, pg_store]
+    modules = [store, config, texts, ae_whatsapp, queries, workflow, pg_store]
     reloaded = []
     for mod in modules:
         try:

@@ -59,7 +59,27 @@ CREATE TABLE IF NOT EXISTS auth_tokens (
     username TEXT NOT NULL,
     created_at TEXT,
     expires_at REAL);
+CREATE TABLE IF NOT EXISTS whatsapp_messages (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    workflow_id TEXT,
+    ticket_id TEXT,
+    assignment_id TEXT,
+    recipient_role TEXT,
+    recipient_id TEXT,
+    recipient_name TEXT,
+    mobile_number TEXT,
+    message_type TEXT,
+    provider_message_id TEXT,
+    template_name TEXT,
+    template_version TEXT,
+    delivery_status TEXT,
+    submitted_at TEXT,
+    sent_at TEXT,
+    delivered_at TEXT,
+    read_at TEXT,
+    failure_reason TEXT);
 CREATE INDEX IF NOT EXISTS idx_calls_ticket ON calls(ticket_id);
+CREATE INDEX IF NOT EXISTS idx_whatsapp_ticket ON whatsapp_messages(ticket_id);
 CREATE INDEX IF NOT EXISTS idx_jobs_due ON jobs(status, run_at);
 CREATE INDEX IF NOT EXISTS idx_audit_ticket ON audit_log(ticket_id);
 CREATE INDEX IF NOT EXISTS idx_tokens_expires ON auth_tokens(expires_at);
@@ -237,3 +257,48 @@ def verify_auth_token(token):
         return None
     return row["username"]
 
+
+
+def record_whatsapp_message(workflow_id, ticket_id, assignment_id, recipient_role,
+                            recipient_id, recipient_name, mobile_number, message_type,
+                            provider_message_id, template_name, template_version,
+                            delivery_status, submitted_at, sent_at, failure_reason=None):
+    return q("""INSERT INTO whatsapp_messages (
+        workflow_id, ticket_id, assignment_id, recipient_role, recipient_id,
+        recipient_name, mobile_number, message_type, provider_message_id,
+        template_name, template_version, delivery_status, submitted_at, sent_at, failure_reason
+    ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""", (
+        workflow_id, ticket_id, assignment_id, recipient_role, recipient_id,
+        recipient_name, mobile_number, message_type, provider_message_id,
+        template_name, template_version, delivery_status, submitted_at, sent_at, failure_reason
+    ))
+
+
+def get_whatsapp_messages(ticket_id):
+    rows = q("SELECT * FROM whatsapp_messages WHERE ticket_id=? ORDER BY id ASC", (ticket_id,))
+    if not rows:
+        return []
+    res = []
+    for r in rows:
+        d = dict(r)
+        res.append({
+            "id": d.get("id"),
+            "workflow_id": d.get("workflow_id"),
+            "ticket_id": d.get("ticket_id"),
+            "assignment_id": d.get("assignment_id"),
+            "recipient_role": d.get("recipient_role"),
+            "recipient_id": d.get("recipient_id") or "",
+            "recipient_name": d.get("recipient_name") or "",
+            "mobile_number": d.get("mobile_number"),
+            "message_type": d.get("message_type"),
+            "provider_message_id": d.get("provider_message_id"),
+            "template_name": d.get("template_name"),
+            "template_version": d.get("template_version") or "v1",
+            "delivery_status": d.get("delivery_status") or "sent",
+            "submitted_at": d.get("submitted_at"),
+            "sent_at": d.get("sent_at"),
+            "delivered_at": d.get("delivered_at"),
+            "read_at": d.get("read_at"),
+            "failure_reason": d.get("failure_reason")
+        })
+    return res

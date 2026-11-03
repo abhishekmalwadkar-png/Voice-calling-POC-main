@@ -170,6 +170,27 @@ def init_db():
         details_json jsonb,
         created_at timestamp with time zone DEFAULT now() NOT NULL
     );
+
+    CREATE TABLE IF NOT EXISTS public.tb_whatsapp_messages (
+        id BIGSERIAL PRIMARY KEY,
+        workflow_id character varying(50),
+        ticket_id character varying(50) NOT NULL,
+        assignment_id character varying(50),
+        recipient_role character varying(30),
+        recipient_id character varying(50),
+        recipient_name character varying(150),
+        mobile_number character varying(30),
+        message_type character varying(40),
+        provider_message_id character varying(100),
+        template_name character varying(100),
+        template_version character varying(50),
+        delivery_status character varying(30),
+        submitted_at timestamp with time zone,
+        sent_at timestamp with time zone,
+        delivered_at timestamp with time zone,
+        read_at timestamp with time zone,
+        failure_reason text
+    );
     """
     try:
         with conn.cursor() as cur:
@@ -428,3 +449,46 @@ def save_voice_call_record(call_dict):
     finally:
         release_connection(conn)
 
+
+
+def save_whatsapp_message_pg(msg_dict):
+    """Insert sent WhatsApp message details into tb_whatsapp_messages in PostgreSQL."""
+    conn = get_connection()
+    if not conn:
+        return False
+    try:
+        with conn.cursor() as cur:
+            cur.execute("""
+                INSERT INTO public.tb_whatsapp_messages (
+                    workflow_id, ticket_id, assignment_id, recipient_role,
+                    recipient_id, recipient_name, mobile_number, message_type,
+                    provider_message_id, template_name, template_version,
+                    delivery_status, submitted_at, sent_at, failure_reason
+                ) VALUES (
+                    %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s
+                )
+            """, (
+                msg_dict.get("workflow_id"),
+                msg_dict.get("ticket_id"),
+                msg_dict.get("assignment_id"),
+                msg_dict.get("recipient_role"),
+                msg_dict.get("recipient_id"),
+                msg_dict.get("recipient_name"),
+                msg_dict.get("mobile_number"),
+                msg_dict.get("message_type"),
+                msg_dict.get("provider_message_id"),
+                msg_dict.get("template_name"),
+                msg_dict.get("template_version", "v1"),
+                msg_dict.get("delivery_status", "sent"),
+                msg_dict.get("submitted_at"),
+                msg_dict.get("sent_at"),
+                msg_dict.get("failure_reason")
+            ))
+        conn.commit()
+        return True
+    except Exception as e:
+        conn.rollback()
+        logger.error(f"Error saving whatsapp message to PostgreSQL: {e}")
+        return False
+    finally:
+        release_connection(conn)

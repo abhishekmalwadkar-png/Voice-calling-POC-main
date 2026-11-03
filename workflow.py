@@ -17,8 +17,8 @@ import ae_whatsapp
 import texts
 import twilio_client
 from config import CFG
-from store import (audit, epoch, get_call, get_ticket, iso_at, now_iso, parse_time, q, ticket_lock,
-                   update_call, update_ticket)
+from store import (audit, epoch, get_call, get_ticket, get_whatsapp_messages, iso_at, now_iso,
+                   parse_time, q, record_whatsapp_message, ticket_lock, update_call, update_ticket)
 
 EVENT_TYPES = {
     "ASSIGNMENT_CREATED", "ASSIGNMENT_INITIAL", "REASSIGNED", "ASSIGNMENT_REASSIGNED",
@@ -572,9 +572,13 @@ def send_whatsapp_alert(t, role, rec, call_cid=None, alert_type_override=None, c
     reason = t.get("esc_reason") or ("emergency" if is_emergency else "no_acknowledgement")
     reject_reason_text = t.get("uc1_reject_reason") or "Declined assignment"
 
+    submitted_time = now_iso()
     def _do_send():
         if wait_time > 0:
             time.sleep(wait_time)
+        status_code = None
+        resp_body = None
+        used_template = "shabakkat_explicitrejection" if reason == "rejected" else "shabakkat_noanswer"
         try:
             # Use WhatsApp template if reason is explicit rejection or no answer
             if reason == "rejected":
@@ -588,16 +592,65 @@ def send_whatsapp_alert(t, role, rec, call_cid=None, alert_type_override=None, c
             if status_code >= 400:
                 print(f"[whatsapp] Template returned {status_code}, falling back to text...", flush=True)
                 status_code, resp_body = ae_whatsapp.send_whatsapp(rec["mobile"], msg)
+                used_template = "free_text"
             print(f"[whatsapp] WhatsApp message sent to {display_name} ({rec['mobile']}) - Status: {status_code}", flush=True)
             audit(tid, "whatsapp_sent", f"{role_title} {alert_type.lower()} WhatsApp message sent to {display_name} ({rec['mobile']})", call_id=call_cid)
         except Exception as ex:  # noqa: BLE001
             try:
                 status_code, resp_body = ae_whatsapp.send_whatsapp(rec["mobile"], msg)
+                used_template = "free_text"
                 print(f"[whatsapp] Fallback text message sent to {display_name} ({rec['mobile']}) - Status: {status_code}", flush=True)
                 audit(tid, "whatsapp_sent", f"{role_title} {alert_type.lower()} WhatsApp text fallback sent to {display_name} ({rec['mobile']})", call_id=call_cid)
             except Exception as ex2:
+                status_code = 500
+                resp_body = str(ex2)
                 print(f"[whatsapp] Failed to send whatsapp message to {display_name} ({rec['mobile']}): {ex2}", flush=True)
                 audit(tid, "whatsapp_error", f"Could not send WhatsApp message to {role_title} ({display_name}): {ex2}", call_id=call_cid)
+
+        # Parse provider_message_id (wamid) from 360dialog response
+        p_msg_id = None
+        if resp_body:
+            try:
+                data = json.loads(resp_body) if isinstance(resp_body, str) else resp_body
+                if isinstance(data, dict) and isinstance(data.get("messages"), list) and len(data["messages"]) > 0:
+                    p_msg_id = data["messages"][0].get("id")
+            except Exception:
+                pass
+
+        # Record message record for DB and API responses
+        w_id = f"WF-{tid}-{t.get('assignment_id') or 'A1'}"
+        deliv_status = "sent" if (status_code and status_code < 400) else "failed"
+        fail_reason = None if deliv_status == "sent" else (str(resp_body)[:250] if resp_body else f"HTTP {status_code}")
+        record_whatsapp_message(
+            workflow_id=w_id,
+            ticket_id=tid,
+            assignment_id=t.get("assignment_id"),
+            recipient_role=role,
+            recipient_id=rec.get("id") or "",
+            recipient_name=rec.get("name") or display_name,
+            mobile_number=rec["mobile"],
+            message_type=f"{alert_type} Alert",
+            provider_message_id=p_msg_id,
+            template_name=used_template,
+            template_version="v1",
+            delivery_status=deliv_status,
+            submitted_at=submitted_time,
+            sent_at=now_iso(),
+            failure_reason=fail_reason
+        )
+        try:
+            import pg_store
+            pg_store.save_whatsapp_message_pg({
+                "workflow_id": w_id, "ticket_id": tid, "assignment_id": t.get("assignment_id"),
+                "recipient_role": role, "recipient_id": rec.get("id") or "",
+                "recipient_name": rec.get("name") or display_name, "mobile_number": rec["mobile"],
+                "message_type": f"{alert_type} Alert", "provider_message_id": p_msg_id,
+                "template_name": used_template, "template_version": "v1",
+                "delivery_status": deliv_status, "submitted_at": submitted_time,
+                "sent_at": now_iso(), "failure_reason": fail_reason
+            })
+        except Exception:
+            pass
 
     threading.Thread(
         target=_do_send,
@@ -1153,6 +1206,7 @@ def ticket_view(tid):
         "followup": {"state": t["followup_state"], "due_at": t["followup_due_at"]},
         "pending_timers": timers,
         "calls": calls,
+        "whatsapp_messages": get_whatsapp_messages(t["ticket_id"]),
         "created_at": t["created_at"], "updated_at": t["updated_at"],
     }
 
