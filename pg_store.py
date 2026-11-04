@@ -582,6 +582,8 @@ def save_pushed_records(items):
                         assigned_at = EXCLUDED.assigned_at;
                 """, (aid, tid, tech_name, tech_mob, tech_lang, Json(tl_dict) if tl_dict else None, Json(mgr_dict) if mgr_dict else None, ticket_status, created_date))
 
+                cur.execute("UPDATE public.tb_tickets SET current_assignment_id = %s WHERE ticket_id = %s", (aid, tid))
+
                 # 3. Insert tb_nextask_events
                 evt_id = f"EVT-PUSH-{int(datetime.now().timestamp()*1000)}-{tid}"
                 cur.execute("""
@@ -829,7 +831,11 @@ def dashboard_data(limit=1000):
         tid = t["ticket_id"]
         cur_aid = t.get("current_assignment_id")
         cur = by_assignment.get(cur_aid)
-        prev = by_assignment.get(cur.get("previous_assignment_id")) if cur else None
+        if not cur and by_ticket.get(tid):
+            # current_assignment_id missing on the ticket: fall back to its latest assignment
+            cur = by_ticket[tid][-1]
+            cur_aid = cur["assignment_id"]
+        prev =by_assignment.get(cur.get("previous_assignment_id")) if cur else None
         aids = {a["assignment_id"] for a in by_ticket.get(tid, [])}
         recipients = {}
         if cur:
