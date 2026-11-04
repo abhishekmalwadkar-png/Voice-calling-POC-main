@@ -489,6 +489,100 @@ Retrieves batch alert status, ticket delivery states, and DTMF interaction histo
 
 ---
 
+---
+
+## 6.1 Voice Calling & Escalation API (`/api/call`)
+
+Triggers automated Twilio voice calls to technicians with DTMF acknowledgment (`1` to accept, `9` to reject). If the technician misses 2 calls, the platform triggers automated escalation with instant SMS alerts to the Team Leader and Manager, followed by an IVR supervisory call.
+
+* **Trigger Call:** `POST /api/call`
+* **Poll Status:** `GET /api/call/{ticket_id}`
+* **Authentication:** Header `X-API-Key: <dynamic_api_key_from_authorize>`
+
+### Sample Request (`POST /api/call`)
+```json
+{
+  "alert_id": "ALM-1001",
+  "ticket_id": "TASK1001",
+  "phone_number": "+966500000001",
+  "site_details": "Olaya Branch ATM, Riyadh",
+  "technician_name": "Ali",
+  "technician_language": "en",
+  "team_leader_number": "+966500000002",
+  "team_leader_name": "Mohammed",
+  "manager_number": "+966500000003",
+  "manager_name": "Khalid",
+  "severity": "Critical",
+  "description": "Network connectivity failure",
+  "ack_digit": "1",
+  "reject_digit": "9"
+}
+```
+
+### Success Response Schema (`GET /api/call/{ticket_id}`)
+```json
+{
+  "ticket_id": "TASK1001",
+  "alert_id": "ALM-1001",
+  "site_name": "Olaya Branch ATM, Riyadh",
+  "severity": "Critical",
+  "status": "Assigned",
+  "acknowledged": true,
+  "dtmf_pressed": "1",
+  "ack_number_pressed": "1",
+  "technician_call_status": "answered",
+  "visit_status": "accepted",
+  "final": true,
+  "call_workflow": {
+    "state": "ACKNOWLEDGED",
+    "final": true,
+    "acknowledged": true,
+    "acknowledged_via": "voice",
+    "acknowledged_at": "2026-11-04T09:01:22+03:00",
+    "technician_response": "acknowledged",
+    "technician_picked_up": true,
+    "escalation": null,
+    "response_summary": "Technician Ali acknowledged via voice call (DTMF 1)"
+  },
+  "calls": [
+    {
+      "id": 1,
+      "role": "technician",
+      "workflow": "uc1_technician",
+      "attempt_no": 1,
+      "recipient_name": "Ali",
+      "to_number": "+966500000001",
+      "language": "en",
+      "call_sid": "CA1234567890abcdef...",
+      "status": "completed",
+      "outcome": "acknowledged",
+      "dtmf": "1",
+      "duration_sec": 34,
+      "picked_up": true
+    }
+  ],
+  "sms_messages": [
+    {
+      "id": 1,
+      "workflow_id": "WF-TASK1001-A1",
+      "ticket_id": "TASK1001",
+      "recipient_role": "team_leader",
+      "recipient_name": "Mohammed",
+      "mobile_number": "+966500000002",
+      "message_type": "Escalation",
+      "provider_message_id": "SM9a8b7c6d5e4f3a2b1c0d9e8f7a6b5c4d",
+      "template_name": "sms_alert_notification",
+      "delivery_status": "sent",
+      "sent_at": "2026-11-04T09:02:16+03:00",
+      "failure_reason": null
+    }
+  ],
+  "status_url": "/api/call/TASK1001"
+}
+```
+
+---
+
 ## 7. Twilio Webhooks
 
 The platform exposes two public endpoints for Twilio Voice communications.
