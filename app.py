@@ -2189,7 +2189,6 @@ def dashboard_html():
       <div class="live-status" title="Dashboard data refreshes in place without reloading the page">
         <span id="liveDot" class="live-dot"></span>
         <span id="liveText">Auto-refresh off</span>
-        <span>&middot; Updated <b id="lastUpdated">--:--:--</b></span>
       </div>
       <div class="live-controls">
         <span class="ctl-label">Press <span class="kbd">/</span> to search</span>
