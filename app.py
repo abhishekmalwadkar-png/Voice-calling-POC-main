@@ -155,8 +155,9 @@ def legacy_call(form):
         raise workflow.EventError(f"missing required field(s): {', '.join(missing)}")
     tid = str(form["ticket_id"]).strip().upper()
     t = store.get_ticket(tid)
-    if t and t["uc1_state"] in workflow.ACTIVE:
-        return 409, {"error": f"{tid} is already in progress ({t['uc1_state']}) - duplicate ignored"}
+    if t and t.get("uc1_state") in workflow.ACTIVE:
+        workflow._stop_all(t, "CANCELLED_REASSIGNED", "STOPPED_REASSIGNED", "superseded by new API call")
+        t = store.get_ticket(tid)
     stamp = int(time.time() * 1000)
     default_language = form.get("language") or "ask"  # per-person *_language overrides it
     recipients = [{"role": "technician", "mobile": str(form["phone_number"]).strip(),
