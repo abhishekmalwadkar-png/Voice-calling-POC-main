@@ -152,12 +152,10 @@ def ingest_event(payload):
     ev, fields, recipients = normalize_event(payload)
     tid = fields["ticket_id"]
     with ticket_lock(tid):
-        if q("SELECT 1 FROM events WHERE event_id=?", (ev["event_id"],), one=True):
-            audit(tid, "event_duplicate", f"Duplicate event {ev['event_id']} suppressed", event_id=ev["event_id"])
-            return 200, {"event_id": ev["event_id"], "result": "duplicate", "ticket_id": tid, "actions": []}
+        # No event_id duplicate check: a repeated event_id is processed again and replaces the stored event row.
         t = get_ticket(tid)
         stale = _stale_reason(t, ev)
-        q("INSERT INTO events (event_id, ticket_id, event_type, version, event_time, received_at, result, note, "
+        q("INSERT OR REPLACE INTO events (event_id, ticket_id, event_type, version, event_time, received_at, result, note, "
           "payload) VALUES (?,?,?,?,?,?,?,?,?)",
           (ev["event_id"], tid, ev["event_type"], ev["version"], ev["event_time"], now_iso(),
            "stale" if stale else "accepted", stale, json.dumps(payload, ensure_ascii=False)))
