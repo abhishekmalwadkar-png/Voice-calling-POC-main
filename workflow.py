@@ -2255,9 +2255,14 @@ def handle_update_records(payload):
 
         t = get_ticket(tid)
         if not t:
+            # Fallback check lowercase / uppercase
+            t = get_ticket(tid.lower()) or get_ticket(tid.upper())
+        if not t:
             fail_count += 1
             results.append({"index": idx, "task_id": tid, "status": "failed", "error": f"Ticket {tid} not found in database"})
             continue
+        # Use actual stored casing
+        tid = t["ticket_id"]
 
         task_status = str(item.get("task_status") or item.get("ticket_status") or item.get("status") or "").strip()
         alarm_status = str(item.get("alarm_status") or "").strip()
@@ -2316,7 +2321,7 @@ def handle_update_records(payload):
             if alarm_status: update_fields["alarm_status"] = alarm_status
 
             set_clause = ", ".join(f"{k}=?" for k in update_fields.keys())
-            q(f"UPDATE tickets SET {set_clause} WHERE ticket_id=?", (*update_fields.values(), tid))
+            q(f"UPDATE tickets SET {set_clause} WHERE ticket_id=? COLLATE NOCASE", (*update_fields.values(), tid))
 
             evt_id = f"EVT-REASSIGN-{int(time.time()*1000)}-{tid}"
             q("""INSERT OR REPLACE INTO events (event_id, ticket_id, event_type, version, event_time, received_at, result, note, payload)
@@ -2354,7 +2359,7 @@ def handle_update_records(payload):
 
             if len(update_fields) > 1:
                 set_clause = ", ".join(f"{k}=?" for k in update_fields.keys())
-                q(f"UPDATE tickets SET {set_clause} WHERE ticket_id=?", (*update_fields.values(), tid))
+                q(f"UPDATE tickets SET {set_clause} WHERE ticket_id=? COLLATE NOCASE", (*update_fields.values(), tid))
 
             evt_id = f"EVT-UPD-{int(time.time()*1000)}-{tid}"
             q("""INSERT OR REPLACE INTO events (event_id, ticket_id, event_type, version, event_time, received_at, result, note, payload)

@@ -180,7 +180,7 @@ def audit(ticket_id, kind, message, call_id=None, event_id=None, data=None):
 
 
 def get_ticket(ticket_id):
-    t = q("SELECT * FROM tickets WHERE ticket_id=? OR alert_id=? OR alarm_id=?", (ticket_id, ticket_id, ticket_id), one=True)
+    t = q("SELECT * FROM tickets WHERE ticket_id=? COLLATE NOCASE OR alert_id=? COLLATE NOCASE OR alarm_id=? COLLATE NOCASE", (ticket_id, ticket_id, ticket_id), one=True)
     if t:
         t["recipients"] = json.loads(t["recipients"] or "{}")
     return t
@@ -193,7 +193,7 @@ def update_ticket(ticket_id, **fields):
         fields["recipients"] = json.dumps(fields["recipients"], ensure_ascii=False)
     fields["updated_at"] = now_iso()
     cols = ", ".join(f"{k}=?" for k in fields)
-    q(f"UPDATE tickets SET {cols} WHERE ticket_id=?", (*fields.values(), ticket_id))
+    q(f"UPDATE tickets SET {cols} WHERE ticket_id=? COLLATE NOCASE", (*fields.values(), ticket_id))
 
 
 def get_call(call_id):

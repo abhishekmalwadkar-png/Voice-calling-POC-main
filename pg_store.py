@@ -515,7 +515,7 @@ def save_pushed_records(items):
                 tid = str(item.get("task_id") or item.get("ticket_id") or "").strip().upper()
                 if not tid:
                     continue
-                cur.execute("SELECT 1 FROM public.tb_tickets WHERE ticket_id=%s LIMIT 1", (tid,))
+                cur.execute("SELECT 1 FROM public.tb_tickets WHERE UPPER(ticket_id)=UPPER(%s) LIMIT 1", (tid,))
                 if cur.fetchone():
                     # Ticket already exists - skip inserting duplicate
                     continue
@@ -631,7 +631,7 @@ def save_updated_records(items):
                     continue
                 update_type = str(item.get("update_type") or "STATUS_UPDATE").strip().upper()
 
-                cur.execute("SELECT current_assignment_id, ticket_status FROM public.tb_tickets WHERE ticket_id=%s", (tid,))
+                cur.execute("SELECT current_assignment_id, ticket_status, ticket_id FROM public.tb_tickets WHERE UPPER(ticket_id)=UPPER(%s)", (tid,))
                 row = cur.fetchone()
                 current_aid = row[0] if row else None
 
@@ -680,7 +680,7 @@ def save_updated_records(items):
                         upd_args.append(alarm_status)
                     upd_args.append(tid)
 
-                    cur.execute(f"UPDATE public.tb_tickets SET {', '.join(upd_fields)} WHERE ticket_id=%s", tuple(upd_args))
+                    cur.execute(f"UPDATE public.tb_tickets SET {', '.join(upd_fields)} WHERE UPPER(ticket_id)=UPPER(%s)", tuple(upd_args))
                     current_aid = new_aid
 
                 else:
@@ -700,7 +700,7 @@ def save_updated_records(items):
 
                     if len(upd_fields) > 1:
                         upd_args.append(tid)
-                        cur.execute(f"UPDATE public.tb_tickets SET {', '.join(upd_fields)} WHERE ticket_id=%s", tuple(upd_args))
+                        cur.execute(f"UPDATE public.tb_tickets SET {', '.join(upd_fields)} WHERE UPPER(ticket_id)=UPPER(%s)", tuple(upd_args))
 
                     if current_aid and task_status:
                         cur.execute("UPDATE public.tb_assignments SET assignment_status=%s WHERE assignment_id=%s", (task_status, current_aid))
@@ -738,7 +738,7 @@ def ticket_exists_pg(ticket_id):
         return False
     try:
         with conn.cursor() as cur:
-            cur.execute("SELECT 1 FROM public.tb_tickets WHERE ticket_id=%s LIMIT 1", (str(ticket_id).strip().upper(),))
+            cur.execute("SELECT 1 FROM public.tb_tickets WHERE UPPER(ticket_id)=UPPER(%s) LIMIT 1", (str(ticket_id).strip().upper(),))
             return cur.fetchone() is not None
     except Exception:
         return False
