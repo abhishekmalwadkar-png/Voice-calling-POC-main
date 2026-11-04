@@ -515,6 +515,10 @@ def save_pushed_records(items):
                 tid = str(item.get("task_id") or item.get("ticket_id") or "").strip().upper()
                 if not tid:
                     continue
+                cur.execute("SELECT 1 FROM public.tb_tickets WHERE ticket_id=%s LIMIT 1", (tid,))
+                if cur.fetchone():
+                    # Ticket already exists - skip inserting duplicate
+                    continue
                 alarm_id = str(item.get("alarm_id") or item.get("issue_type") or f"ALM-{tid}").strip()
                 alert_id = str(item.get("alert_id") or tid).strip()
                 site_num = str(item.get("site_number") or "").strip()
@@ -722,6 +726,21 @@ def save_updated_records(items):
     except Exception as e:
         conn.rollback()
         logger.error(f"Error saving updated records to PostgreSQL: {e}")
+        return False
+    finally:
+        release_connection(conn)
+
+
+def ticket_exists_pg(ticket_id):
+    """Check if ticket exists in PostgreSQL tb_tickets."""
+    conn = get_connection()
+    if not conn:
+        return False
+    try:
+        with conn.cursor() as cur:
+            cur.execute("SELECT 1 FROM public.tb_tickets WHERE ticket_id=%s LIMIT 1", (str(ticket_id).strip().upper(),))
+            return cur.fetchone() is not None
+    except Exception:
         return False
     finally:
         release_connection(conn)

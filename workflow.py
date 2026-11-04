@@ -2025,6 +2025,8 @@ def handle_push_records(payload):
     valid_items = []
     success_count = 0
     fail_count = 0
+    already_exists_count = 0
+    new_stored_count = 0
     current_time = now_iso()
 
     for idx, item in enumerate(items):
@@ -2101,24 +2103,35 @@ def handle_push_records(payload):
             with ticket_lock(tid):
                 existing = get_ticket(tid)
                 if not existing:
-                    q("""INSERT INTO tickets (
-                        ticket_id, alert_id, alarm_id, assignment_id, site_number,
-                        site_name, severity, status, alarm_status, description,
-                        recipients, uc1_assignment_id, uc1_state, created_at, updated_at
-                    ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
-                      (tid, alert_id, alarm_id, aid, site_num,
-                       site_name, severity, ticket_status, alarm_status, issue_desc,
-                       recip_json, aid, "ASSIGNED", created_date, current_time))
-                else:
-                    q("""UPDATE tickets SET
-                        alert_id=?, alarm_id=?, assignment_id=?, site_number=?,
-                        site_name=?, severity=?, status=?, alarm_status=?,
-                        description=?, recipients=?, uc1_assignment_id=?,
-                        uc1_state=COALESCE(uc1_state, 'ASSIGNED'), updated_at=?
-                        WHERE ticket_id=?""",
-                      (alert_id, alarm_id, aid, site_num,
-                       site_name, severity, ticket_status, alarm_status,
-                       issue_desc, recip_json, aid, current_time, tid))
+                    try:
+                        import pg_store
+                        if pg_store.ticket_exists_pg(tid):
+                            existing = {"ticket_id": tid}
+                    except Exception:
+                        pass
+
+                if existing:
+                    already_exists_count += 1
+                    success_count += 1
+                    results.append({
+                        "index": idx,
+                        "task_id": tid,
+                        "ticket_id": tid,
+                        "status": "already_exists",
+                        "message": "ticket_id / task_id already exists",
+                        "site_number": existing.get("site_number") or site_num,
+                        "severity": existing.get("severity") or severity
+                    })
+                    continue
+
+                q("""INSERT INTO tickets (
+                    ticket_id, alert_id, alarm_id, assignment_id, site_number,
+                    site_name, severity, status, alarm_status, description,
+                    recipients, uc1_assignment_id, uc1_state, created_at, updated_at
+                ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                  (tid, alert_id, alarm_id, aid, site_num,
+                   site_name, severity, ticket_status, alarm_status, issue_desc,
+                   recip_json, aid, "ASSIGNED", created_date, current_time))
 
                 evt_id = f"EVT-PUSH-{int(time.time()*1000)}-{tid}"
                 q("""INSERT OR REPLACE INTO events (
@@ -2130,6 +2143,7 @@ def handle_push_records(payload):
 
                 audit(tid, "alert_ingested", f"New alert ingested: Ticket {tid} ({issue_desc})", event_id=evt_id)
 
+            new_stored_count += 1
             success_count += 1
             valid_items.append(item)
             results.append({
@@ -2159,9 +2173,16 @@ def handle_push_records(payload):
         except Exception as e:
             logger.warning(f"PostgreSQL push records notice: {e}")
 
+    if already_exists_count > 0 and new_stored_count == 0 and fail_count == 0:
+        summary_msg = "ticket_id / task_id already exists"
+    elif already_exists_count > 0:
+        summary_msg = f"Processed {len(items)} record(s): {new_stored_count} stored successfully, {already_exists_count} already exists, {fail_count} failed"
+    else:
+        summary_msg = f"Processed {len(items)} record(s): {success_count} stored successfully, {fail_count} failed"
+
     resp = {
         "status": "success" if fail_count == 0 else ("partial" if success_count > 0 else "error"),
-        "message": f"Processed {len(items)} record(s): {success_count} stored successfully, {fail_count} failed",
+        "message": summary_msg,
         "records_count": len(items),
         "success_count": success_count,
         "failed_count": fail_count,
@@ -2209,6 +2230,8 @@ def handle_update_records(payload):
     valid_items = []
     success_count = 0
     fail_count = 0
+    already_exists_count = 0
+    new_stored_count = 0
     current_time = now_iso()
 
     for idx, item in enumerate(items):
