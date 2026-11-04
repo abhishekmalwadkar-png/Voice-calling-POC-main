@@ -822,21 +822,70 @@ def dashboard_html():
             f"{safe_esc(filter_cat)}"
         )
 
-        lang_attr = " ".join(set(all_languages)) or "en"
-        outcome_attr = " ".join(set(all_outcomes)) or "none"
+        all_langs_set = set()
+        for r_role, r_info in recips.items():
+            if isinstance(r_info, dict):
+                l = str(r_info.get("language") or "").lower().strip()
+                if l:
+                    all_langs_set.add(l)
+                    all_langs_set.add(full_lang_name(l).lower())
+                    for code_l, name_l in (("en", "english"), ("ar", "arabic"), ("hi", "hindi"), ("ur", "urdu")):
+                        if l == code_l or l == name_l:
+                            all_langs_set.add(code_l)
+                            all_langs_set.add(name_l)
+        for cl in all_languages:
+            all_langs_set.add(cl.lower())
+            all_langs_set.add(full_lang_name(cl).lower())
+            for code_l, name_l in (("en", "english"), ("ar", "arabic"), ("hi", "hindi"), ("ur", "urdu")):
+                if cl == code_l or cl == name_l:
+                    all_langs_set.add(code_l)
+                    all_langs_set.add(name_l)
+        lang_attr = " ".join(all_langs_set) or "en english"
+
+        all_outcomes_set = set(all_outcomes)
+        if is_ack:
+            all_outcomes_set.add("acknowledged")
+            all_outcomes_set.add("accepted")
+        if is_unresolved or "ESCALAT" in state:
+            all_outcomes_set.add("escalated")
+        for c in v.get("calls", []):
+            if c.get("outcome"):
+                all_outcomes_set.add(str(c["outcome"]).lower())
+            if c.get("response"):
+                all_outcomes_set.add(str(c["response"]).lower())
+            if c.get("status"):
+                all_outcomes_set.add(str(c["status"]).lower())
+            if str(c.get("dtmf") or "").strip() == "1":
+                all_outcomes_set.add("acknowledged")
+                all_outcomes_set.add("accepted")
+            elif str(c.get("dtmf") or "").strip() == "2":
+                all_outcomes_set.add("rejected")
+        outcome_attr = " ".join(all_outcomes_set) or "none"
+
         tid_str = str(v.get('ticket_id') or '').upper()
         sev_str = str(v.get('severity') or '').lower()
         desc_str = str(v.get('description') or '').lower()
         if tid_str.startswith('EMG') or sev_str == 'emergency' or 'emergency' in desc_str:
             all_workflows.append('emergency')
-        elif not all_workflows:
-            all_workflows.append('uc1_technician')
-
-        created_raw = str(v.get('created_at') or v.get('last_event_time') or '')
-        date_match = re.search(r'\d{4}[-/]\d{2}[-/]\d{2}', created_raw)
-        date_iso = date_match.group(0).replace('/', '-') if date_match else ''
+        if is_unresolved or filter_cat == "escalated":
+            all_workflows.append("uc1_escalation")
+            all_workflows.append("escalation")
+        if filter_cat in ("assigned", "reassigned", "pending", "ack"):
+            all_workflows.append("uc1_technician")
+            all_workflows.append("technician")
         wf_attr = " ".join(set(all_workflows))
         wa_status_attr = " ".join(set(all_wa_statuses)) or "none"
+
+        created_raw = str(v.get('created_at') or v.get('last_event_time') or '')
+        date_iso = ""
+        if created_raw:
+            m = re.search(r'(\d{4})[-/](\d{1,2})[-/](\d{1,2})', created_raw)
+            if m:
+                date_iso = f"{m.group(1)}-{int(m.group(2)):02d}-{int(m.group(3)):02d}"
+            else:
+                m2 = re.search(r'(\d{1,2})[-/](\d{1,2})[-/](\d{4})', created_raw)
+                if m2:
+                    date_iso = f"{m2.group(3)}-{int(m2.group(2)):02d}-{int(m2.group(1)):02d}"
 
         task_details_obj = {
             "task_id": v.get("ticket_id"),
@@ -961,7 +1010,7 @@ def dashboard_html():
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
-  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+  <script src="/static/chart.umd.min.js"></script>
   <style>
     :root {{
       --bg: #f8fafc;
@@ -2166,7 +2215,7 @@ def dashboard_html():
       <div class="metric-card" data-cat="all" onclick="quickFilter('all')" title="Total tasks recorded in queue">
         <div class="metric-label">Total Tasks</div>
         <div class="metric-value-row">
-          <div class="metric-number">{total_tickets}</div>
+          <div class="metric-number" id="metric-total">{total_tickets}</div>
           <span class="metric-badge badge-blue">All</span>
         </div>
       </div>
@@ -2174,7 +2223,7 @@ def dashboard_html():
       <div class="metric-card" data-cat="assigned" onclick="quickFilter('assigned')" title="Newly assigned tasks">
         <div class="metric-label">Assigned Tasks</div>
         <div class="metric-value-row">
-          <div class="metric-number">{assigned_count}</div>
+          <div class="metric-number" id="metric-assigned">{assigned_count}</div>
           <span class="metric-badge badge-cyan">New</span>
         </div>
       </div>
@@ -2182,7 +2231,7 @@ def dashboard_html():
       <div class="metric-card" data-cat="reassigned" onclick="quickFilter('reassigned')" title="Tasks reassigned to a new technician">
         <div class="metric-label">Reassigned Tasks</div>
         <div class="metric-value-row">
-          <div class="metric-number">{reassigned_count}</div>
+          <div class="metric-number" id="metric-reassigned">{reassigned_count}</div>
           <span class="metric-badge badge-purple">Reassigned</span>
         </div>
       </div>
@@ -2190,7 +2239,7 @@ def dashboard_html():
       <div class="metric-card" data-cat="pending" onclick="quickFilter('pending')" title="Active dialing or awaiting response">
         <div class="metric-label">Pending / In-Call</div>
         <div class="metric-value-row">
-          <div class="metric-number">{pending_count}</div>
+          <div class="metric-number" id="metric-pending">{pending_count}</div>
           <span class="metric-badge badge-amber">Dialing</span>
         </div>
       </div>
@@ -2198,7 +2247,7 @@ def dashboard_html():
       <div class="metric-card" data-cat="escalated" onclick="quickFilter('escalated')" title="Escalated tasks to Team Leader or Manager">
         <div class="metric-label">Escalated Tasks</div>
         <div class="metric-value-row">
-          <div class="metric-number">{escalated_count}</div>
+          <div class="metric-number" id="metric-escalated">{escalated_count}</div>
           <span class="metric-badge badge-red">Tier 1 & 2</span>
         </div>
       </div>
@@ -2206,7 +2255,7 @@ def dashboard_html():
       <div class="metric-card" data-cat="ack" onclick="quickFilter('ack')" title="Calls accepted and acknowledged">
         <div class="metric-label">Acknowledged</div>
         <div class="metric-value-row">
-          <div class="metric-number">{ack_count}</div>
+          <div class="metric-number" id="metric-ack">{ack_count}</div>
           <span class="metric-badge badge-green">{ack_rate} Rate</span>
         </div>
       </div>
@@ -2214,7 +2263,7 @@ def dashboard_html():
       <div class="metric-card" data-cat="unresolved" onclick="quickFilter('unresolved')" title="Escalated tasks currently pending resolution">
         <div class="metric-label">Unresolved Escalations</div>
         <div class="metric-value-row">
-          <div class="metric-number">{unresolved_count}</div>
+          <div class="metric-number" id="metric-unresolved">{unresolved_count}</div>
           <span class="metric-badge badge-red">Open Attention</span>
         </div>
       </div>
@@ -2222,7 +2271,7 @@ def dashboard_html():
       <div class="metric-card" onclick="filterBySms('delivered')" title="WhatsApp Template Alerts Sent / Delivered (click to show delivered SMS tasks)">
         <div class="metric-label">SMS Dispatched</div>
         <div class="metric-value-row">
-          <div class="metric-number">{wa_total}</div>
+          <div class="metric-number" id="metric-wa-total">{wa_total}</div>
           <span class="metric-badge badge-purple">{wa_delivered} Deliv</span>
         </div>
       </div>
@@ -2230,7 +2279,7 @@ def dashboard_html():
       <div class="metric-card" title="Technical Failures or Call Exceptions">
         <div class="metric-label">Technical Exceptions</div>
         <div class="metric-value-row">
-          <div class="metric-number">{calls_failed}</div>
+          <div class="metric-number" id="metric-calls-failed">{calls_failed}</div>
           <span class="metric-badge badge-slate">Failed Calls</span>
         </div>
       </div>
@@ -2464,12 +2513,19 @@ def dashboard_html():
   </div>
 
   <div id="toastStack" class="toast-stack"></div>
-  <script type="application/json" id="dashStats">{dash_stats_json}</script>
+    <script type="application/json" id="dashStats">{dash_stats_json}</script>
 
   <script>
     var activeCategory = 'all';
     var PAGE_SIZE = 10;
     var currentPage = 1;
+    var currentSort = 'default';
+    var autoRefreshTimer = null;
+    var autoRefreshSeconds = 10;
+    window.statusChart = null;
+    window.severityChart = null;
+    window.activityChart = null;
+    window.__matchedCards = [];
 
     function normalizeIsoDate(dStr) {{
       if (!dStr) return '';
@@ -2520,6 +2576,16 @@ def dashboard_html():
       quickFilter('all');
     }}
 
+    function filterBySms(status) {{
+      var elWa = document.getElementById('filterWaStatus');
+      if (elWa) {{
+        elWa.value = status;
+        runFilter();
+        var sec = document.getElementById('ticketsSection');
+        if (sec) sec.scrollIntoView({{ behavior: 'smooth', block: 'start' }});
+      }}
+    }}
+
     function copyText(txt) {{
       if (!txt) return;
       navigator.clipboard.writeText(txt).then(function() {{
@@ -2535,6 +2601,52 @@ def dashboard_html():
       var section = document.getElementById('ticketsSection');
       if (section) {{
         section.scrollIntoView({{ behavior: 'smooth', block: 'start' }});
+      }}
+    }}
+
+    function setPageSize(val) {{
+      PAGE_SIZE = parseInt(val, 10) || 10;
+      currentPage = 1;
+      runFilter();
+    }}
+
+    function setSort(val) {{
+      currentSort = val;
+      var list = document.getElementById('ticketsList');
+      if (!list) return;
+      var cards = Array.from(list.querySelectorAll('.ticket-card'));
+      cards.sort(function(a, b) {{
+        if (currentSort === 'newest') {{
+          var da = a.getAttribute('data-date') || a.getAttribute('data-ts') || '';
+          var db = b.getAttribute('data-date') || b.getAttribute('data-ts') || '';
+          return db.localeCompare(da);
+        }} else if (currentSort === 'oldest') {{
+          var da = a.getAttribute('data-date') || a.getAttribute('data-ts') || '';
+          var db = b.getAttribute('data-date') || b.getAttribute('data-ts') || '';
+          return da.localeCompare(db);
+        }} else if (currentSort === 'severity') {{
+          var ra = parseInt(a.getAttribute('data-sevrank') || '1', 10);
+          var rb = parseInt(b.getAttribute('data-sevrank') || '1', 10);
+          return rb - ra;
+        }} else if (currentSort === 'tid') {{
+          var ta = (a.getAttribute('data-tid') || '').toLowerCase();
+          var tb = (b.getAttribute('data-tid') || '').toLowerCase();
+          return ta.localeCompare(tb);
+        }}
+        return 0;
+      }});
+      cards.forEach(function(card) {{ list.appendChild(card); }});
+      currentPage = 1;
+      runFilter();
+    }}
+
+    function toggleCompact() {{
+      document.body.classList.toggle('compact');
+      var btn = document.getElementById('compactBtn');
+      if (btn) {{
+        var isCompact = document.body.classList.contains('compact');
+        btn.classList.toggle('on', isCompact);
+        btn.innerText = isCompact ? 'Expanded View' : 'Compact View';
       }}
     }}
 
@@ -2639,18 +2751,22 @@ def dashboard_html():
 
           // 3. Date range matching (both YYYY-MM-DD)
           var dateMatch = true;
-          if (fromDate) {{
-            if (!date || date < fromDate) dateMatch = false;
+          if (fromDate && date) {{
+            if (date < fromDate) dateMatch = false;
           }}
-          if (toDate) {{
-            if (!date || date > toDate) dateMatch = false;
+          if (toDate && date) {{
+            if (date > toDate) dateMatch = false;
           }}
 
           // 4. Workflow matching
           var wfMatch = (fWf === 'all');
           if (!wfMatch) {{
             if (fWf === 'emergency') {{
-              wfMatch = (wf.indexOf('emergency') !== -1 || text.indexOf('emg-') !== -1 || text.indexOf('emergency') !== -1);
+              wfMatch = (wf.indexOf('emergency') !== -1 || text.indexOf('emergency') !== -1 || sev === 'emergency');
+            }} else if (fWf === 'uc1_escalation') {{
+              wfMatch = (wf.indexOf('escalat') !== -1 || cat === 'escalated' || unresolved === 'true');
+            }} else if (fWf === 'uc1_technician') {{
+              wfMatch = (wf.indexOf('technician') !== -1 || wf.indexOf('uc1') !== -1 || cat === 'assigned' || cat === 'reassigned' || cat === 'pending' || cat === 'ack');
             }} else {{
               wfMatch = (wf.indexOf(fWf) !== -1);
             }}
@@ -2660,7 +2776,24 @@ def dashboard_html():
           var langMatch = (fLang === 'all' || lang.indexOf(fLang) !== -1);
 
           // 6. Outcome matching
-          var outcomeMatch = (fOutcome === 'all' || outcome.indexOf(fOutcome) !== -1);
+          var outcomeMatch = (fOutcome === 'all');
+          if (!outcomeMatch) {{
+            if (fOutcome === 'acknowledged') {{
+              outcomeMatch = (ack === 'true' || outcome.indexOf('ack') !== -1 || outcome.indexOf('accept') !== -1);
+            }} else if (fOutcome === 'rejected') {{
+              outcomeMatch = (outcome.indexOf('reject') !== -1);
+            }} else if (fOutcome === 'no_input') {{
+              outcomeMatch = (outcome.indexOf('no_input') !== -1 || outcome.indexOf('timeout') !== -1 || outcome.indexOf('no-answer') !== -1);
+            }} else if (fOutcome === 'reached') {{
+              outcomeMatch = (outcome.indexOf('reached') !== -1 || outcome.indexOf('completed') !== -1 || outcome.indexOf('answered') !== -1 || ack === 'true');
+            }} else if (fOutcome === 'reassign_yes') {{
+              outcomeMatch = (outcome.indexOf('reassign_yes') !== -1 || cat === 'reassigned');
+            }} else if (fOutcome === 'reassign_no') {{
+              outcomeMatch = (outcome.indexOf('reassign_no') !== -1);
+            }} else {{
+              outcomeMatch = (outcome.indexOf(fOutcome) !== -1);
+            }}
+          }}
 
           // 7. Acknowledgement matching
           var ackMatch = (fAck === 'all' || ack === fAck);
@@ -2739,8 +2872,6 @@ def dashboard_html():
       }}
     }}
 
-    // Chronological Audit Timeline Inspection Modal
-
     function exportFilteredCsv() {{
       try {{
         var cards = window.__matchedCards;
@@ -2770,17 +2901,21 @@ def dashboard_html():
           rows.push([tid, sev, cat, ts, lang, outcome, wf, ack, unres, searchDetails]);
         }});
 
+        var nl = String.fromCharCode(10);
+        var crlf = String.fromCharCode(13, 10);
+        var bom = String.fromCharCode(0xFEFF);
+
         var csvLines = rows.map(function(row) {{
           return row.map(function(field) {{
             var str = String(field || '');
-            if (str.indexOf(',') !== -1 || str.indexOf('"') !== -1 || str.indexOf('\n') !== -1) {{
-              str = '"' + str.replace(/"/g, '""') + '"';
+            if (str.indexOf(',') !== -1 || str.indexOf('"') !== -1 || str.indexOf(nl) !== -1) {{
+              str = '"' + str.split('"').join('""') + '"';
             }}
             return str;
           }}).join(',');
-        }}).join('\r\n');
+        }}).join(crlf);
 
-        var blob = new Blob(['\uFEFF' + csvLines], {{ type: 'text/csv;charset=utf-8;' }});
+        var blob = new Blob([bom + csvLines], {{ type: 'text/csv;charset=utf-8;' }});
         var url = URL.createObjectURL(blob);
         var link = document.createElement('a');
         var nowStr = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
@@ -2828,7 +2963,7 @@ def dashboard_html():
             else if (cat.indexOf('escalat') !== -1 || cat.indexOf('reject') !== -1) nodeClass = 'node-escalation';
             else if (cat.indexOf('ack') !== -1 || cat.indexOf('valid') !== -1) nodeClass = 'node-ack';
 
-                        var pillsHtml = '';
+            var pillsHtml = '';
             if (sid) pillsHtml += '<span class="corr-id" data-copy="' + sid + '" onclick="copyText(this.dataset.copy)" title="Click to copy Call SID">Call SID: ' + sid + '</span> ';
             if (mid) pillsHtml += '<span class="corr-id corr-id-wa" data-copy="' + mid + '" onclick="copyText(this.dataset.copy)" title="Click to copy WhatsApp ID">WAMID: ' + mid + '</span> ';
             if (eid) pillsHtml += '<span class="corr-id" data-copy="' + eid + '" onclick="copyText(this.dataset.copy)" title="Click to copy Event ID">Event ID: ' + eid + '</span> ';
@@ -2864,7 +2999,6 @@ def dashboard_html():
       }}
     }}
 
-    // Task Details Modal Handlers
     function openTaskDetails(btn) {{
       try {{
         var raw = btn.getAttribute('data-task');
@@ -2983,17 +3117,198 @@ def dashboard_html():
       }}
     }});
 
-    // Initialize Charts Safely (Never blocking)
-    (function initCharts() {{
+    // Bulletproof Native Canvas Chart Renderer (Runs standalone if Chart.js is not yet ready)
+    function drawNativeCanvasCharts(statusData, sevData, actData) {{
+      // 1. Status Chart
+      var elStatus = document.getElementById('statusChart');
+      if (elStatus && elStatus.getContext) {{
+        var ctx = elStatus.getContext('2d');
+        var w = elStatus.parentElement.clientWidth || 320;
+        var h = 190;
+        elStatus.width = w;
+        elStatus.height = h;
+        ctx.clearRect(0, 0, w, h);
+        
+        var colors = ['#06b6d4', '#a855f7', '#f59e0b', '#ef4444', '#10b981'];
+        var labels = ['Assigned', 'Reassigned', 'Pending', 'Escalated', 'Ack'];
+        var cats = ['assigned', 'reassigned', 'pending', 'escalated', 'ack'];
+        var total = statusData.reduce(function(a, b) {{ return a + b; }}, 0);
+
+        var cx = w * 0.36;
+        var cy = h * 0.5;
+        var r = Math.min(cx - 20, cy - 15);
+        var innerR = r * 0.62;
+
+        if (total === 0) {{
+          ctx.beginPath();
+          ctx.arc(cx, cy, r, 0, 2 * Math.PI);
+          ctx.arc(cx, cy, innerR, 2 * Math.PI, 0, true);
+          ctx.fillStyle = '#f1f5f9';
+          ctx.fill();
+        }} else {{
+          var startAngle = -Math.PI / 2;
+          for (var i = 0; i < statusData.length; i++) {{
+            var slice = (statusData[i] / total) * 2 * Math.PI;
+            if (slice > 0) {{
+              ctx.beginPath();
+              ctx.arc(cx, cy, r, startAngle, startAngle + slice);
+              ctx.arc(cx, cy, innerR, startAngle + slice, startAngle, true);
+              ctx.closePath();
+              ctx.fillStyle = colors[i];
+              ctx.fill();
+              startAngle += slice;
+            }}
+          }}
+        }}
+
+        // Center text
+        ctx.fillStyle = '#0f172a';
+        ctx.font = 'bold 20px Inter, sans-serif';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(total, cx, cy - 4);
+        ctx.fillStyle = '#64748b';
+        ctx.font = '10.5px Inter, sans-serif';
+        ctx.fillText('Total Tasks', cx, cy + 14);
+
+        // Legend
+        var lx = w * 0.68;
+        var ly = 25;
+        ctx.textAlign = 'left';
+        for (var i = 0; i < labels.length; i++) {{
+          ctx.fillStyle = colors[i];
+          ctx.fillRect(lx, ly + i * 26, 11, 11);
+          ctx.fillStyle = '#334155';
+          ctx.font = '500 11px Inter, sans-serif';
+          ctx.fillText(labels[i] + ' (' + statusData[i] + ')', lx + 18, ly + i * 26 + 9);
+        }}
+
+        elStatus.onclick = function(e) {{
+          var rect = elStatus.getBoundingClientRect();
+          var x = e.clientX - rect.left;
+          var y = e.clientY - rect.top;
+          if (x >= lx) {{
+            var clickedIdx = Math.floor((y - ly) / 26);
+            if (clickedIdx >= 0 && clickedIdx < cats.length) {{
+              quickFilter(cats[clickedIdx]);
+            }}
+          }} else {{
+            quickFilter('all');
+          }}
+        }};
+      }}
+
+      // 2. Severity Bars
+      var elSev = document.getElementById('severityChart');
+      if (elSev && elSev.getContext) {{
+        var ctx = elSev.getContext('2d');
+        var w = elSev.parentElement.clientWidth || 320;
+        var h = 190;
+        elSev.width = w;
+        elSev.height = h;
+        ctx.clearRect(0, 0, w, h);
+
+        var colors = ['#2563eb', '#f59e0b', '#dc2626', '#991b1b'];
+        var labels = ['Minor', 'Major', 'Critical', 'Emergency'];
+        var sevCats = ['minor', 'major', 'critical', 'emergency'];
+        var maxVal = Math.max(1, Math.max.apply(null, sevData));
+        var chartH = 120;
+        var barW = Math.min(36, (w - 60) / 4 - 16);
+        var gap = (w - 40) / 4;
+
+        for (var i = 0; i < 4; i++) {{
+          var bx = 25 + i * gap + (gap - barW) / 2;
+          var bh = (sevData[i] / maxVal) * chartH;
+          var by = 145 - bh;
+
+          ctx.fillStyle = colors[i];
+          ctx.beginPath();
+          if (bh > 0) {{
+            ctx.roundRect ? ctx.roundRect(bx, by, barW, bh, [4, 4, 0, 0]) : ctx.fillRect(bx, by, barW, bh);
+            ctx.fill();
+          }}
+
+          ctx.fillStyle = '#0f172a';
+          ctx.font = 'bold 12px Inter, sans-serif';
+          ctx.textAlign = 'center';
+          ctx.fillText(sevData[i], bx + barW / 2, by - 6);
+
+          ctx.fillStyle = '#64748b';
+          ctx.font = '500 11px Inter, sans-serif';
+          ctx.fillText(labels[i], bx + barW / 2, 165);
+        }}
+
+        elSev.onclick = function(e) {{
+          var rect = elSev.getBoundingClientRect();
+          var x = e.clientX - rect.left;
+          var idx = Math.floor((x - 20) / gap);
+          if (idx >= 0 && idx < 4) {{
+            var elSevField = document.getElementById('filterSeverity');
+            if (elSevField) {{
+              elSevField.value = sevCats[idx];
+              runFilter();
+              var sec = document.getElementById('ticketsSection');
+              if (sec) sec.scrollIntoView({{ behavior: 'smooth', block: 'start' }});
+            }}
+          }}
+        }};
+      }}
+
+      // 3. Activity Bars
+      var elAct = document.getElementById('activityChart');
+      if (elAct && elAct.getContext) {{
+        var ctx = elAct.getContext('2d');
+        var w = elAct.parentElement.clientWidth || 320;
+        var h = 190;
+        elAct.width = w;
+        elAct.height = h;
+        ctx.clearRect(0, 0, w, h);
+
+        var colors = ['#4f46e5', '#059669', '#7c3aed'];
+        var labels = ['Total Calls', 'Completed', 'SMS Alerts'];
+        var maxVal = Math.max(1, Math.max.apply(null, actData));
+        var chartH = 120;
+        var barW = Math.min(42, (w - 60) / 3 - 20);
+        var gap = (w - 40) / 3;
+
+        for (var i = 0; i < 3; i++) {{
+          var bx = 25 + i * gap + (gap - barW) / 2;
+          var bh = (actData[i] / maxVal) * chartH;
+          var by = 145 - bh;
+
+          ctx.fillStyle = colors[i];
+          ctx.beginPath();
+          if (bh > 0) {{
+            ctx.roundRect ? ctx.roundRect(bx, by, barW, bh, [4, 4, 0, 0]) : ctx.fillRect(bx, by, barW, bh);
+            ctx.fill();
+          }}
+
+          ctx.fillStyle = '#0f172a';
+          ctx.font = 'bold 12px Inter, sans-serif';
+          ctx.textAlign = 'center';
+          ctx.fillText(actData[i], bx + barW / 2, by - 6);
+
+          ctx.fillStyle = '#64748b';
+          ctx.font = '500 11px Inter, sans-serif';
+          ctx.fillText(labels[i], bx + barW / 2, 165);
+        }}
+      }}
+    }}
+
+    // Initialize Charts Safely with Real-Time Global References
+    function initCharts() {{
+      const statusData = [{assigned_count}, {reassigned_count}, {pending_count}, {escalated_count}, {ack_count}];
+      const sevData = [{minor_count}, {major_count}, {critical_count}, {emergency_count}];
+      const actData = [{calls_total}, {calls_completed}, {wa_total}];
+
       if (typeof Chart === 'undefined') {{
-        console.warn('Chart.js library is not available or blocked by network.');
+        drawNativeCanvasCharts(statusData, sevData, actData);
         return;
       }}
       try {{
-        const statusData = [{assigned_count}, {reassigned_count}, {pending_count}, {escalated_count}, {ack_count}];
         const elStatus = document.getElementById('statusChart');
         if (elStatus) {{
-          new Chart(elStatus.getContext('2d'), {{
+          window.statusChart = new Chart(elStatus.getContext('2d'), {{
             type: 'doughnut',
             data: {{
               labels: ['Assigned', 'Reassigned', 'Pending / In-Call', 'Escalated', 'Acknowledged'],
@@ -3014,14 +3329,23 @@ def dashboard_html():
                   labels: {{ boxWidth: 12, padding: 14, font: {{ family: 'Inter', size: 11, weight: '500' }}, color: '#475569' }}
                 }}
               }},
-              cutout: '68%'
+              cutout: '68%',
+              onClick: function(evt, elements) {{
+                if (elements && elements.length > 0) {{
+                  var idx = elements[0].index;
+                  var cats = ['assigned', 'reassigned', 'pending', 'escalated', 'ack'];
+                  if (cats[idx]) {{
+                    quickFilter(cats[idx]);
+                  }}
+                }}
+              }}
             }}
           }});
         }}
 
         const elSev = document.getElementById('severityChart');
         if (elSev) {{
-          new Chart(elSev.getContext('2d'), {{
+          window.severityChart = new Chart(elSev.getContext('2d'), {{
             type: 'bar',
             data: {{
               labels: ['Minor', 'Major', 'Critical', 'Emergency'],
@@ -3045,9 +3369,9 @@ def dashboard_html():
                 if (elements && elements.length > 0) {{
                   var idx = elements[0].index;
                   var labels = ['minor', 'major', 'critical', 'emergency'];
-                  var elSev = document.getElementById('filterSeverity');
-                  if (elSev && labels[idx]) {{
-                    elSev.value = labels[idx];
+                  var elSevField = document.getElementById('filterSeverity');
+                  if (elSevField && labels[idx]) {{
+                    elSevField.value = labels[idx];
                     runFilter();
                     var sec = document.getElementById('ticketsSection');
                     if (sec) sec.scrollIntoView({{ behavior: 'smooth', block: 'start' }});
@@ -3060,7 +3384,7 @@ def dashboard_html():
 
         const elAct = document.getElementById('activityChart');
         if (elAct) {{
-          new Chart(elAct.getContext('2d'), {{
+          window.activityChart = new Chart(elAct.getContext('2d'), {{
             type: 'bar',
             data: {{
               labels: ['Total Calls', 'Completed Calls', 'SMS Alerts'],
@@ -3086,9 +3410,123 @@ def dashboard_html():
       }} catch(err) {{
         console.warn('Charts init notice:', err);
       }}
-    }})();
+    }}
 
-    // Execute Initial Filter on Page Load
+    // Real-Time Live Refresh Engine
+    function setRefreshInterval(sec) {{
+      autoRefreshSeconds = parseInt(sec, 10) || 10;
+      if (autoRefreshTimer) {{
+        clearInterval(autoRefreshTimer);
+        autoRefreshTimer = setInterval(function() {{ refreshDashboard(false); }}, autoRefreshSeconds * 1000);
+      }}
+    }}
+
+    function toggleAutoRefresh() {{
+      var dot = document.getElementById('liveDot');
+      var text = document.getElementById('liveText');
+      var btn = document.getElementById('autoRefreshBtn');
+      var label = document.getElementById('autoRefreshLabel');
+
+      if (autoRefreshTimer) {{
+        clearInterval(autoRefreshTimer);
+        autoRefreshTimer = null;
+        if (dot) dot.classList.remove('on');
+        if (text) text.innerText = 'Auto-refresh off';
+        if (btn) btn.classList.remove('on');
+        if (label) label.innerText = 'Auto-Refresh';
+      }} else {{
+        autoRefreshTimer = setInterval(function() {{ refreshDashboard(false); }}, autoRefreshSeconds * 1000);
+        if (dot) dot.classList.add('on');
+        if (text) text.innerText = 'Live (' + autoRefreshSeconds + 's)';
+        if (btn) btn.classList.add('on');
+        if (label) label.innerText = 'Stop Refresh';
+        refreshDashboard(false);
+      }}
+    }}
+
+    function refreshDashboard(manual) {{
+      var btn = document.getElementById('refreshNowBtn');
+      if (manual && btn) {{
+        btn.disabled = true;
+        btn.classList.add('spinning');
+      }}
+
+      fetch('/api/dashboard/stats')
+        .then(function(res) {{ return res.json(); }})
+        .then(function(data) {{
+          if (!data || !data.stats) return;
+          var s = data.stats;
+
+          var updateNum = function(id, val) {{
+            var el = document.getElementById(id);
+            if (el) {{
+              if (el.innerText !== String(val)) {{
+                el.innerText = val;
+                var card = el.closest('.metric-card');
+                if (card) {{
+                  card.classList.add('bump');
+                  setTimeout(function() {{ card.classList.remove('bump'); }}, 600);
+                }}
+              }}
+            }}
+          }};
+
+          updateNum('metric-total', s.total_tickets);
+          updateNum('metric-assigned', s.assigned_count);
+          updateNum('metric-reassigned', s.reassigned_count);
+          updateNum('metric-pending', s.pending_count);
+          updateNum('metric-escalated', s.escalated_count);
+          updateNum('metric-ack', s.ack_count);
+          updateNum('metric-unresolved', s.unresolved_count);
+          updateNum('metric-wa-total', s.wa_total);
+          updateNum('metric-calls-failed', s.calls_failed);
+
+          // Update pill buttons text
+          var updateTab = function(id, name, val) {{
+            var el = document.getElementById(id);
+            if (el) el.innerText = name + ' (' + val + ')';
+          }};
+          updateTab('tab-btn-all', 'All Tasks', s.total_tickets);
+          updateTab('tab-btn-assigned', 'Assigned', s.assigned_count);
+          updateTab('tab-btn-reassigned', 'Reassigned', s.reassigned_count);
+          updateTab('tab-btn-pending', 'Pending / In-Call', s.pending_count);
+          updateTab('tab-btn-escalated', 'Escalated', s.escalated_count);
+          updateTab('tab-btn-ack', 'Acknowledged', s.ack_count);
+          updateTab('tab-btn-unresolved', 'Unresolved Escalations', s.unresolved_count);
+
+          // Update charts in real time
+          if (window.statusChart && window.statusChart.data) {{
+            window.statusChart.data.datasets[0].data = [s.assigned_count, s.reassigned_count, s.pending_count, s.escalated_count, s.ack_count];
+            window.statusChart.update();
+          }}
+          if (window.severityChart && window.severityChart.data) {{
+            window.severityChart.data.datasets[0].data = [s.minor_count, s.major_count, s.critical_count, s.emergency_count];
+            window.severityChart.update();
+          }}
+          if (window.activityChart && window.activityChart.data) {{
+            window.activityChart.data.datasets[0].data = [s.calls_total, s.calls_completed, s.wa_total];
+            window.activityChart.update();
+          }}
+
+          // Update timestamp
+          var now = new Date();
+          var timeStr = now.toLocaleTimeString();
+          var lu = document.getElementById('lastUpdated');
+          if (lu) lu.innerText = timeStr;
+        }})
+        .catch(function(err) {{
+          console.warn('Dashboard refresh notice:', err);
+        }})
+        .finally(function() {{
+          if (manual && btn) {{
+            btn.disabled = false;
+            btn.classList.remove('spinning');
+          }}
+        }});
+    }}
+
+    // Initialize charts and initial filter
+    initCharts();
     runFilter();
   </script>
 </body>
@@ -3342,7 +3780,7 @@ class Handler(BaseHTTPRequestHandler):
                 store.audit(None, "twilio_signature_rejected", f"Rejected unsigned/forged request to {self.path}")
             return ok
         if path in ("/api/health", "/health", "/api/authenticate", "/authenticate", "/api/auth", "/api/login",
-                    "/api/authorize", "/api/authorization", "/api/verify", "/docs", "/api/docs", "/documentation", "/login", "/logout"):
+                    "/api/authorize", "/api/authorization", "/api/verify", "/docs", "/api/docs", "/documentation", "/login", "/logout") or path.startswith("/static/"):
             return True
         if path.startswith("/api/"):
             sent_key = self._extract_token(form)
@@ -3372,6 +3810,15 @@ class Handler(BaseHTTPRequestHandler):
                 "required_header": "X-API-Key"
             })
         try:
+            if path.startswith("/static/"):
+                rel_path = path[len("/static/"):].lstrip("/")
+                file_path = os.path.join(config.BASE_DIR, "static", rel_path)
+                if os.path.isfile(file_path):
+                    with open(file_path, "rb") as sf:
+                        content_type = "application/javascript" if file_path.endswith(".js") else "text/css"
+                        return self._send(200, sf.read().decode("utf-8", errors="replace"), content_type)
+                return self._json(404, {"error": "static file not found"})
+
             if path == "/logout":
                 self.send_response(303)
                 self.send_header("Set-Cookie", "flm_session=; Path=/; Max-Age=0; HttpOnly; SameSite=Lax")
@@ -3537,6 +3984,47 @@ class Handler(BaseHTTPRequestHandler):
                 })
             if path == "/api/config":
                 return self._json(200, queries.config_view())
+            if path in ("/api/dashboard/stats", "/api/dashboard/data"):
+                import pg_store
+                pg = pg_store.dashboard_data(1000)
+                if pg is None:
+                    pg = {"tickets": [], "wa_total": 0, "wa_delivered": 0, "calls_total": 0, "calls_completed": 0, "calls_failed": 0}
+                t_list = pg["tickets"]
+                n_total = len(t_list)
+                n_ack = sum(1 for t in t_list if t.get("acknowledged"))
+                n_reassign = sum(1 for t in t_list if not t.get("acknowledged") and (str(t.get("status") or "").lower() in ("reassigned", "assignment_reassigned") or bool((t.get("recipients") or {}).get("previous_technician"))))
+                n_esc = sum(1 for t in t_list if not t.get("acknowledged") and ("ESCALAT" in (t.get("call_workflow") or {}).get("state", "").upper() or "MANAGER" in (t.get("call_workflow") or {}).get("state", "").upper() or "LEADER" in (t.get("call_workflow") or {}).get("state", "").upper()))
+                n_pending = sum(1 for t in t_list if not t.get("acknowledged") and ("CALL" in (t.get("call_workflow") or {}).get("state", "").upper() or "PENDING" in (t.get("call_workflow") or {}).get("state", "").upper() or bool(t.get("calls"))))
+                n_assigned = max(0, n_total - n_ack - n_reassign - n_esc - n_pending)
+                
+                n_emg = sum(1 for t in t_list if str(t.get("severity") or "").lower() == "emergency" or str(t.get("ticket_id") or "").upper().startswith("EMG"))
+                n_crit = sum(1 for t in t_list if str(t.get("severity") or "").lower() == "critical")
+                n_maj = sum(1 for t in t_list if str(t.get("severity") or "").lower() == "major")
+                n_min = max(0, n_total - n_emg - n_crit - n_maj)
+
+                return self._json(200, {
+                    "status": "ok",
+                    "stats": {
+                        "total_tickets": n_total,
+                        "assigned_count": n_assigned,
+                        "reassigned_count": n_reassign,
+                        "pending_count": n_pending,
+                        "escalated_count": n_esc,
+                        "ack_count": n_ack,
+                        "unresolved_count": n_esc,
+                        "wa_total": pg["wa_total"],
+                        "wa_delivered": pg["wa_delivered"],
+                        "calls_total": pg["calls_total"],
+                        "calls_completed": pg["calls_completed"],
+                        "calls_failed": pg["calls_failed"],
+                        "minor_count": n_min,
+                        "major_count": n_maj,
+                        "critical_count": n_crit,
+                        "emergency_count": n_emg,
+                    },
+                    "timestamp": store.now_iso()
+                })
+
             if path == "/api/tickets":
                 return self._json(200, queries.list_tickets(params))
             m = TICKET_PATH.match(path)
