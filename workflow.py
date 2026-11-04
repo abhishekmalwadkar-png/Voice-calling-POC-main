@@ -24,6 +24,7 @@ EVENT_TYPES = {
     "ASSIGNMENT_CREATED", "ASSIGNMENT_INITIAL", "REASSIGNED", "ASSIGNMENT_REASSIGNED",
     "ASSIGNMENT_ACCEPTED", "ASSIGNMENT_REJECTED",
     "OPERATIONAL_STATUS", "ALARM_STATUS", "TICKET_CREATED", "TICKET_UPDATED", "SEVERITY_CHANGED", "TICKET_CLOSED",
+    "ALERT_INGESTED",  # data only: stores the alert/ticket, starts no call
 }
 TICKET_FIELDS = ("ticket_id", "alert_id", "alarm_id", "assignment_id", "site_number", "site_name", "severity", "status", "region", "country_code",
                  "alarm_status", "operational_status", "description")
