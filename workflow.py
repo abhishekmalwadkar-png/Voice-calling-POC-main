@@ -2067,8 +2067,8 @@ def handle_push_records(payload):
 
         alarm_id = str(item.get("alarm_id") or extracted["issue_type"] or f"ALM-{tid}").strip()
         alert_id = str(item.get("alert_id") or tid).strip()
-        site_num = extracted["site_number"]
-        site_name = str(item.get("site_name") or f"Site {site_num}").strip()
+        site_num = str(item.get("site_number") or extracted.get("site_number") or item.get("site_id") or "").strip()
+        site_name = str(item.get("site_name") or item.get("branch_name") or (f"Site {site_num}" if site_num else "Main Site")).strip()
         issue_desc = extracted["issue_description"]
         alarm_type = extracted["issue_type"]
         severity = extracted["severity"]
@@ -2122,6 +2122,7 @@ def handle_push_records(payload):
                         "status": "already_exists",
                         "message": f"ticket_id / task_id '{tid}' already exists in database",
                         "site_number": existing.get("site_number") or site_num,
+                        "site_name": existing.get("site_name") or site_name,
                         "severity": existing.get("severity") or severity
                     })
                     continue
@@ -2154,6 +2155,7 @@ def handle_push_records(payload):
                 "ticket_id": tid,
                 "status": "stored",
                 "site_number": site_num,
+                "site_name": site_name,
                 "severity": severity,
                 "technician": f"{extracted['technician_name']} ({recipients['technician']['mobile']})"
             })

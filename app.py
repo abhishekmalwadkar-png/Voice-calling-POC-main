@@ -513,9 +513,10 @@ def dashboard_html():
     reassigned_count = 0
     pending_count = 0
     escalated_count = 0
+    emergency_count = 0
     critical_count = 0
     major_count = 0
-    normal_count = 0
+    minor_count = 0
     unresolved_count = 0
 
     try:
@@ -622,17 +623,27 @@ def dashboard_html():
             status_text = "ASSIGNED"
             is_unresolved = False
 
-        severity = str(v.get("severity") or "Normal").capitalize()
-        sev_lower = severity.lower()
-        if sev_lower == "critical":
+        sev_raw = str(v.get("severity") or "").strip()
+        sev_lower = sev_raw.lower()
+        tid_str = str(v.get("ticket_id") or "").upper()
+        desc_str = str(v.get("description") or "").lower()
+
+        if sev_lower == "emergency" or tid_str.startswith("EMG") or "emergency" in desc_str:
+            emergency_count += 1
+            severity = "Emergency"
+            sev_cls = "sev-emergency"
+        elif sev_lower == "critical":
             critical_count += 1
+            severity = "Critical"
             sev_cls = "sev-critical"
         elif sev_lower == "major":
             major_count += 1
+            severity = "Major"
             sev_cls = "sev-major"
         else:
-            normal_count += 1
-            sev_cls = "sev-normal"
+            minor_count += 1
+            severity = "Minor" if sev_lower in ("minor", "normal", "low", "") else sev_raw.capitalize()
+            sev_cls = "sev-minor"
 
         op_status = v.get("operational_status")
         op_badge = f'<span class="sub-badge op-badge">Movement: <b>{safe_esc(op_status)}</b></span>' if op_status else ""
@@ -1336,9 +1347,11 @@ def dashboard_html():
       text-transform: uppercase;
       letter-spacing: 0.04em;
     }}
+    .sev-emergency {{ background: #fdf2f8; color: #991b1b; border: 1px solid #fecdd3; }}
     .sev-critical {{ background: #fef2f2; color: #dc2626; border: 1px solid #fecaca; }}
     .sev-major {{ background: #fffbeb; color: #d97706; border: 1px solid #fde68a; }}
-    .sev-normal {{ background: #f0fdf4; color: #16a34a; border: 1px solid #bbf7d0; }}
+    .sev-minor {{ background: #eff6ff; color: #2563eb; border: 1px solid #bfdbfe; }}
+    .sev-normal {{ background: #eff6ff; color: #2563eb; border: 1px solid #bfdbfe; }}
     .sub-badge {{
       font-size: 11px;
       color: #64748b;
@@ -2572,11 +2585,11 @@ def dashboard_html():
           new Chart(elSev.getContext('2d'), {{
             type: 'bar',
             data: {{
-              labels: ['Critical', 'Major', 'Normal / Low'],
+              labels: ['Minor', 'Major', 'Critical', 'Emergency'],
               datasets: [{{
                 label: 'Tasks',
-                data: [{critical_count}, {major_count}, {normal_count}],
-                backgroundColor: ['#dc2626', '#f59e0b', '#2563eb'],
+                data: [{minor_count}, {major_count}, {critical_count}, {emergency_count}],
+                backgroundColor: ['#2563eb', '#f59e0b', '#dc2626', '#991b1b'],
                 borderRadius: 6,
                 barThickness: 28
               }}]
@@ -3027,6 +3040,7 @@ class Handler(BaseHTTPRequestHandler):
                                 "task_status": "Dispatch",
                                 "alarm_status": "Active",
                                 "site_number": "SITE001",
+                                "site_name": "Site SITE001",
                                 "created_date": "2026-11-03T10:30:00+03:00",
                                 "technician_name": "Ali",
                                 "technician_mobile": "+966500000001",

@@ -227,7 +227,7 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"region\": \"Riyadh\",\n  \"site_name\": \"Site A\",\n  \"description\": \"Generator Failure - Main Power Outage\",\n  \"alert_id\": \"AL12345\",\n  \"technician_name\": \"Ahmed Al-Harbi\",\n  \"technician_number\": \"0500000001\",\n  \"team_leader_name\": \"Imran Khan\",\n  \"team_leader_number\": \"0500000002\",\n  \"manager_name\": \"Sara Al-Otaibi\",\n  \"manager_number\": \"0500000003\",\n  \"severity\": \"Critical\",\n  \"date_time\": \"2026-10-30T10:00:00+03:00\",\n  \"country_code\": \"+966\",\n  \"alert_status\": \"Active\"\n}"
+              "raw": "{\n  \"tickets\": [\n    {\n      \"task_id\": \"TASK1001\",\n      \"issue_description\": \"Network connectivity failure\",\n      \"issue_type\": \"Network Failure\",\n      \"severity\": \"Critical\",\n      \"task_status\": \"Dispatch\",\n      \"alarm_status\": \"Active\",\n      \"site_number\": \"SITE001\",\n      \"site_name\": \"Site SITE001\",\n      \"created_date\": \"2026-11-03T10:30:00+03:00\",\n      \"technician_name\": \"Ali\",\n      \"technician_mobile\": \"+966500000001\",\n      \"technician_preferred_lang\": \"English\",\n      \"teamleader_name\": \"Mohammed\",\n      \"teamleader_mobile\": \"+966500000002\",\n      \"teamleader_preferred_lang\": \"Arabic\",\n      \"manager_name\": \"Khalid\",\n      \"manager_mobile\": \"+966500000003\",\n      \"manager_preferred_lang\": \"English\"\n    }\n  ]\n}"
             },
             "url": {
               "raw": "{{base_url}}/api/alerts",
@@ -696,7 +696,7 @@
                 "followup"
               ]
             },
-            "description": "202 reminder_call_placed · 200 not_needed (closed / reassigned / status recorded / alarm cleared) · 409 not acknowledged yet · 404 unknown ticket.",
+            "description": "202 reminder_call_placed \u00b7 200 not_needed (closed / reassigned / status recorded / alarm cleared) \u00b7 409 not acknowledged yet \u00b7 404 unknown ticket.",
             "body": {
               "mode": "raw",
               "raw": "{\n  \"assignment_id\": \"{{assignment_id}}\"\n}",
