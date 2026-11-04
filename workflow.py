@@ -750,7 +750,10 @@ def trigger_emergency(ticket_id, alarm_id, assignment_id, site_name, description
               f"Emergency workflow triggered for {ticket_id} at {site_name}. Severity: {severity}")
 
         calls_placed = {}
-        # 1. Voice calls are disabled for Emergency API (do not send call)
+        # 1. Voice call to technician (attempt 1)
+        if (merged.get("technician") or {}).get("mobile"):
+            cid = _place_call(t, "technician", 1, "uc1_technician")
+            calls_placed["technician"] = cid
 
         # 2. WhatsApp alerts sent directly to Team Leader and Technician
         wa_recipients = []
