@@ -157,8 +157,24 @@ def legacy_call(form):
                 form[k] = v
 
     if form.get("event_type") or (isinstance(form.get("ticket"), dict) and "recipients" in form):
-        code, body = workflow.ingest_event(form)
         tid = form.get("ticket_id") or form.get("task_id") or (form.get("ticket") or {}).get("ticket_id")
+        if tid:
+            tid_str = str(tid).strip().upper()
+            t_prev = store.get_ticket(tid_str)
+            if t_prev and t_prev.get("uc1_state") in workflow.ACTIVE:
+                workflow._stop_all(t_prev, "CANCELLED_REASSIGNED", "STOPPED_REASSIGNED", "superseded by new API call")
+
+        # Auto-uniquify event_id and assignment_id if re-used in /api/call so it NEVER fails with duplicate!
+        eid = form.get("event_id")
+        if eid and store.q("SELECT 1 FROM events WHERE event_id=?", (str(eid).strip(),), one=True):
+            stamp = int(time.time() * 1000)
+            form["event_id"] = f"{eid}-{stamp}"
+            if "ticket" in form and isinstance(form["ticket"], dict) and form["ticket"].get("assignment_id"):
+                form["ticket"]["assignment_id"] = f"{form['ticket']['assignment_id']}-{stamp}"
+            elif form.get("assignment_id"):
+                form["assignment_id"] = f"{form['assignment_id']}-{stamp}"
+
+        code, body = workflow.ingest_event(form)
         if tid and code == 202:
             return code, dict(legacy_view(str(tid).upper()) or body, status_url=f"/api/call/{tid}")
         return code, body
