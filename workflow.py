@@ -562,22 +562,43 @@ def send_sms_alert(t, role, rec, call_cid=None, alert_type_override=None, custom
     reason = t.get("esc_reason") or ("emergency" if is_emergency else "no_acknowledgement")
     reject_reason_text = t.get("uc1_reject_reason") or "Declined assignment"
 
+    # Format escalation date as DD-Mon-YYYY (e.g. 04-Nov-2026)
+    try:
+        esc_date = datetime.now().strftime("%d-%b-%Y")
+    except Exception:
+        esc_date = now_iso()[:10]
+
     if reason == "rejected":
         sms_body = (
-            f"FLM Alert ({role_title}): Ticket {tid} at {site_name}. "
-            f"Technician {tech_name} REJECTED assignment. Reason: {reject_reason_text}. "
-            f"Issue: {desc}. Immediate action required."
+            f"*Technician Assignment Escalation – Rejection*\n\n"
+            f"Ticket {tid} at {site_name} is assigned to {tech_name}.\n\n"
+            f"The technician rejected the assignment.\n\n"
+            f"Rejection reason: {reject_reason_text}.\n\n"
+            f"Latest contact outcome: {reject_reason_text}.\n\n"
+            f"Total call attempts: {attempt_no}.\n\n"
+            f"Escalation timestamp: {esc_date}.\n\n"
+            f"Please follow up in NexTask."
         )
     elif is_emergency:
         sms_body = (
-            f"FLM EMERGENCY Alert ({role_title}): Ticket {tid} at {site_name}. "
-            f"Severity: Emergency. Issue: {desc}. "
-            f"{tech_line}. Immediate action required."
+            f"*Emergency Alert Escalation*\n\n"
+            f"Ticket {tid} at {site_name} is assigned to {tech_name}.\n\n"
+            f"Severity: Emergency.\n\n"
+            f"Issue: {desc}.\n\n"
+            f"Total call attempts: {attempt_no}.\n\n"
+            f"Escalation timestamp: {esc_date}.\n\n"
+            f"Please follow up in NexTask."
         )
     else:
         sms_body = (
-            f"FLM Escalation Alert ({role_title}): Ticket {tid} at {site_name}. "
-            f"{tech_line}. Issue: {desc}. Immediate action required."
+            f"*Technician Assignment Escalation – No Answer*\n\n"
+            f"Ticket {tid} at {site_name} is assigned to {tech_name}.\n\n"
+            f"The technician did not answer after {attempt_no} call attempts.\n\n"
+            f"Issue: {desc}.\n\n"
+            f"Latest contact outcome: No answer.\n\n"
+            f"Total call attempts: {attempt_no}.\n\n"
+            f"Escalation timestamp: {esc_date}.\n\n"
+            f"Please follow up in NexTask."
         )
 
     wait_time = delay_sec if delay_sec is not None else (2.0 if role == "manager" else 0.0)
@@ -647,10 +668,18 @@ def send_sms_closure(t, role, rec, resolution=None, closed_at=None, delay_sec=No
     display_name = rec.get("name") or role_title
     res = str(resolution or "Emergency issue resolved and service restored.").replace('\n', ' ').strip()
     close_time = closed_at or now_iso()
+    try:
+        close_date = datetime.now().strftime("%d-%b-%Y")
+    except Exception:
+        close_date = close_time[:10]
+    site_disp = t.get('site_name') or t.get('site_number') or 'N/A'
     sms_body = (
-        f"FLM Emergency Closure ({role_title}): Ticket {tid} at {t.get('site_name') or 'N/A'}. "
-        f"Status: Closed at {close_time}. Resolution: {res}. "
-        f"Ticket closed. No action required."
+        f"*Ticket Closure Notice*\n\n"
+        f"Ticket {tid} at {site_disp}.\n\n"
+        f"Status: Closed.\n\n"
+        f"Resolution: {res}.\n\n"
+        f"Closure timestamp: {close_date}.\n\n"
+        f"No further action required in NexTask."
     )
     wait_time = delay_sec if delay_sec is not None else (2.0 if role == "manager" else 0.0)
 
