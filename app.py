@@ -2755,7 +2755,7 @@ def dashboard_html():
           var wf = card.getAttribute('data-wf') || '';
           var ack = (card.getAttribute('data-ack') === 'true') ? 'YES' : 'NO';
           var unres = (card.getAttribute('data-unresolved') === 'true') ? 'YES' : 'NO';
-          var searchDetails = (card.getAttribute('data-search') || '').replace(/\s+/g, ' ').trim();
+          var searchDetails = (card.getAttribute('data-search') || '').replace(/\\s+/g, ' ').trim();
 
           rows.push([tid, sev, cat, ts, lang, outcome, wf, ack, unres, searchDetails]);
         }});
