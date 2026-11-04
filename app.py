@@ -1566,11 +1566,9 @@ def dashboard_html():
       </div>
       <div>
         <div class="brand-title">NexTask Voice Operations & Audit Center</div>
-        <div class="brand-mode">{mode}</div>
       </div>
     </div>
     <div class="header-actions">
-      <a href="/docs" class="btn-header" target="_blank" title="Open API Documentation">API Docs</a>
       <a href="/logout" class="btn-header" title="Log out from administrative session">
         <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path><polyline points="16 17 21 12 16 7"></polyline><line x1="21" y1="12" x2="9" y2="12"></line></svg>
         Logout
