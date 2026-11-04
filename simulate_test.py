@@ -578,9 +578,9 @@ th, box = in_background(http, "POST", "/api/call?wait=true&until=final&timeout=2
                          "site_details": "Site 9", "language": "en", "technician_name": "Ahmed Khan",
                          "team_leader_number": "+912222222222", "team_leader_name": "Imran"})
 xml = answer(wait_call("NAME1", "technician", 1), "9")
-assert "Hello Ahmed Khan. This is the Automation Edge helpdesk." in xml, xml
+assert "Hello Ahmed Khan. This is the Shabakkat helpdesk." in xml, xml
 xml = answer(wait_call("NAME1", "team_leader", 1, "uc1_escalation"), "1")
-assert "Hello Imran. This is the Automation Edge helpdesk escalation." in xml, xml
+assert "Hello Imran. This is the Shabakkat helpdesk escalation." in xml, xml
 assert "The technician Ahmed Khan has rejected the assignment." in xml, xml
 th.join(25)
 code, res = box["res"]

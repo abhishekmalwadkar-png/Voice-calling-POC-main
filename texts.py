@@ -19,9 +19,9 @@ LANGS = {
         "menu": "For English, press {n}.",
         "alarm": " Alarm {a}.",
         "greet": "Hello.", "greet_name": "Hello {rname}.",
-        "technician": "{greet} This is the Automation Edge helpdesk. Ticket {t} has been assigned to you, "
-                      "at site {s}.{alarm} Press {ack} to acknowledge this ticket. Press {rej} to reject it.",
-        "escalation": "{greet} This is the Automation Edge helpdesk escalation. Ticket {t}, at site {s}.{alarm} "
+        "technician": "{greet} This is the Shabakkat helpdesk. Task {t} has been assigned to you, "
+                      "at site {s}.{alarm} Press {ack} to acknowledge this task. Press {rej} to reject it.",
+        "escalation": "{greet} This is the Shabakkat helpdesk escalation. Task {t}, at site {s}.{alarm} "
                       "The technician {name} {reason}.",
         "escalation_question": "Should we assign this alert to another technician? "
                                "Press {ack} for yes. Press {rej} for no.",
@@ -29,18 +29,18 @@ LANGS = {
         "reassign_no": "Thank you. This alert will not be assigned to another technician. Goodbye.",
         "reason_rejected": "has rejected the assignment",
         "reason_no_ack": "has not acknowledged the assignment after {n} calls",
-        "emergency_technician": "{greet} This is an emergency alert. Ticket {t}, alert ID {alert_id}, "
+        "emergency_technician": "{greet} This is an emergency alert. Task {t}, alert ID {alert_id}, "
                                 "at {s}. Severity: {severity}. Issue: {desc}. "
                                 "Please take action immediately.",
-        "emergency_escalation": "{greet} This is the helpdesk emergency escalation for ticket {t}. Technician {name} {reason}. Please take action or ask technician to review it.",
+        "emergency_escalation": "{greet} This is the helpdesk emergency escalation for task {t}. Technician {name} {reason}. Please take action or ask technician to review it.",
         "emergency_reason_no_answer": "did not answer the call",
         "emergency_reason_rejected": "has rejected the assignment",
-        "reminder": "Reminder from the Automation Edge helpdesk. Ticket {t}, at site {s}, is still waiting for "
+        "reminder": "Reminder from the Shabakkat helpdesk. Task {t}, at site {s}, is still waiting for "
                     "your status update. Please we request you to update departed, arrived or started in NexTask.",
         "ack": "Thank you. Your acknowledgement has been recorded. Goodbye.",
-        "reject": "Your rejection has been recorded. The ticket will be escalated. Goodbye.",
+        "reject": "Your rejection has been recorded. The task will be escalated. Goodbye.",
         "reject_reason_prompt": "Please select a reason for declining. Press 1 if you are busy on another site. Press 2 if you are on leave. Press 3 if you have an equipment or vehicle issue. Press 4 for other reasons.",
-        "reject_reason_recorded": "Thank you. Your reason has been recorded. The ticket will be escalated. Goodbye.",
+        "reject_reason_recorded": "Thank you. Your reason has been recorded. The task will be escalated. Goodbye.",
         "invalid": "Sorry, that is not a valid option.",
         "noinput": "We did not receive any input. Goodbye.",
         "goodbye": "Goodbye.",
@@ -50,27 +50,27 @@ LANGS = {
         "menu": "للعربية، اضغط {n}.",
         "alarm": " التنبيه {a}.",
         "greet": "مرحبا.", "greet_name": "مرحبا {rname}.",
-        "technician": "{greet} هذا مكتب المساعدة من أوتوميشن إيدج. تم تعيين التذكرة {t} لك، في الموقع {s}.{alarm} "
+        "technician": "{greet} هذا مكتب المساعدة من شبكات. تم تعيين المهمة {t} لك، في الموقع {s}.{alarm} "
                       "اضغط {ack} لتأكيد الاستلام. اضغط {rej} للرفض.",
-        "escalation": "{greet} هذا تصعيد من مكتب المساعدة. التذكرة {t}، في الموقع {s}.{alarm} "
+        "escalation": "{greet} هذا تصعيد من مكتب المساعدة. المهمة {t}، في الموقع {s}.{alarm} "
                       "الفني {name} {reason}.",
         "escalation_question": "هل نُسند هذا التنبيه إلى فني آخر؟ اضغط {ack} للموافقة. اضغط {rej} للرفض.",
         "reassign_yes": "شكرا لك. سيتم إسناد هذا التنبيه إلى فني آخر. مع السلامة.",
         "reassign_no": "شكرا لك. لن يتم إسناد هذا التنبيه إلى فني آخر. مع السلامة.",
         "reason_rejected": "رفض المهمة",
         "reason_no_ack": "لم يؤكد استلام المهمة بعد {n} مكالمات",
-        "emergency_technician": "{greet} هذا تنبيه طوارئ. التذكرة {t}، برقم التنبيه {alert_id}. "
+        "emergency_technician": "{greet} هذا تنبيه طوارئ. المهمة {t}، برقم التنبيه {alert_id}. "
                                 "الموقع {s}. مستوى الخطورة {severity}. المشكلة: {desc}. "
                                 "يرجى اتخاذ الإجراء فورا.",
-        "emergency_escalation": "{greet} هذا تصعيد طارئ للتذكرة {t}. الفني {name} {reason}. يرجى اتخاذ الإجراء أو مطالبة الفني بمراجعتها.",
+        "emergency_escalation": "{greet} هذا تصعيد طارئ للمهمة {t}. الفني {name} {reason}. يرجى اتخاذ الإجراء أو مطالبة الفني بمراجعتها.",
         "emergency_reason_no_answer": "لم يرد على المكالمة",
         "emergency_reason_rejected": "رفض المهمة",
-        "reminder": "تذكير من مكتب المساعدة. التذكرة {t} في الموقع {s} ما زالت بانتظار تحديث حالتك. "
+        "reminder": "تذكير من مكتب المساعدة. المهمة {t} في الموقع {s} ما زالت بانتظار تحديث حالتك. "
                     "يرجى تحديث الحالة في نكست تاسك: غادرت، وصلت أو بدأت.",
         "ack": "شكرا لك. تم تسجيل تأكيد الاستلام. مع السلامة.",
-        "reject": "تم تسجيل الرفض وسيتم تصعيد التذكرة. مع السلامة.",
+        "reject": "تم تسجيل الرفض وسيتم تصعيد المهمة. مع السلامة.",
         "reject_reason_prompt": "يرجى اختيار سبب الرفض. اضغط 1 إذا كنت مشغولاً في موقع آخر. اضغط 2 إذا كنت في إجازة. اضغط 3 إذا كان هناك عطل في المعدات أو المركبة. اضغط 4 لأسباب أخرى.",
-        "reject_reason_recorded": "شكرا لك. تم تسجيل سبب الرفض وسيتم تصعيد التذكرة. مع السلامة.",
+        "reject_reason_recorded": "شكرا لك. تم تسجيل سبب الرفض وسيتم تصعيد المهمة. مع السلامة.",
         "invalid": "عذرا، هذا خيار غير صالح.",
         "noinput": "لم نتلق أي إدخال. مع السلامة.",
         "goodbye": "مع السلامة.",
@@ -81,9 +81,9 @@ LANGS = {
         "menu": "उर्दू के लिए {n} दबाइए।",
         "alarm": " अलार्म {a}।",
         "greet": "अस्सलाम-ओ-अलैकुम।", "greet_name": "अस्सलाम-ओ-अलैकुम {rname}।",
-        "technician": "{greet} यह ऑटोमेशन एज हेल्पडेस्क है। टिकट {t} आपको दिया गया है, साइट {s}।{alarm} "
-                      "टिकट क़ुबूल करने के लिए {ack} दबाइए। मुस्तरद करने के लिए {rej} दबाइए।",
-        "escalation": "{greet} यह हेल्पडेस्क एस्केलेशन है। टिकट {t}, साइट {s}।{alarm} "
+        "technician": "{greet} यह शबक्कत हेल्पडेस्क है। टास्क {t} आपको दिया गया है, साइट {s}।{alarm} "
+                      "टास्क क़ुबूल करने के लिए {ack} दबाइए। मुस्तरद करने के लिए {rej} दबाइए।",
+        "escalation": "{greet} यह हेल्पडेस्क एस्केलेशन है। टास्क {t}, साइट {s}।{alarm} "
                        "टेक्नीशियन {name} {reason}।",
         "escalation_question": "क्या यह अलर्ट किसी दूसरे टेक्नीशियन को दे दिया जाए? "
                                 "हाँ के लिए {ack} दबाइए। नहीं के लिए {rej} दबाइए।",
@@ -91,18 +91,18 @@ LANGS = {
         "reassign_no": "शुक्रिया। यह अलर्ट दूसरे टेक्नीशियन को नहीं दिया जाएगा। ख़ुदा हाफ़िज़।",
         "reason_rejected": "ने असाइनमेंट मुस्तरद कर दिया है",
         "reason_no_ack": "ने {n} कॉल के बाद भी असाइनमेंट क़ुबूल नहीं किया",
-        "emergency_technician": "{greet} यह एक इमरजेंसी अलर्ट है। टिकट {t}, अलर्ट आईडी {alert_id}। "
+        "emergency_technician": "{greet} यह एक इमरजेंसी अलर्ट है। टास्क {t}, अलर्ट आईडी {alert_id}। "
                                 "साइट {s}। गंभीरता {severity}। मसला: {desc}। "
                                 "बराए मेहरबानी फ़ौरन कार्रवाई कीजिए।",
-        "emergency_escalation": "{greet} यह टिकट {t} का इमरजेंसी एस्केलेशन है। टेक्नीशियन {name} {reason}। बराए मेहरबानी कार्रवाई कीजिए या टेक्नीशियन से रिव्यू करने को कहिए।",
+        "emergency_escalation": "{greet} यह टास्क {t} का इमरजेंसी एस्केलेशन है। टेक्नीशियन {name} {reason}। बराए मेहरबानी कार्रवाई कीजिए या टेक्नीशियन से रिव्यू करने को कहिए।",
         "emergency_reason_no_answer": "ने कॉल का जवाब नहीं दिया",
         "emergency_reason_rejected": "ने असाइनमेंट मुस्तरद कर दिया है",
-        "reminder": "हेल्पडेस्क की याद-दहानी। टिकट {t}, साइट {s}, पर आपका स्टेटस अपडेट अभी बाक़ी है। "
+        "reminder": "हेल्पडेस्क की याद-दहानी। टास्क {t}, साइट {s}, पर आपका स्टेटस अपडेट अभी बाक़ी है। "
                     "बराए मेहरबानी नेक्स्ट टास्क में रवाना, पहुँच गए या काम शुरू, अपडेट कीजिए।",
         "ack": "शुक्रिया। आपकी तस्दीक़ दर्ज कर ली गई है। ख़ुदा हाफ़िज़।",
-        "reject": "आपका इनकार दर्ज कर लिया गया है। टिकट आगे भेजा जाएगा। ख़ुदा हाफ़िज़।",
+        "reject": "आपका इनकार दर्ज कर लिया गया है। टास्क आगे भेजा जाएगा। ख़ुदा हाफ़िज़।",
         "reject_reason_prompt": "मुस्तरद करने की वजह चुनिए। किसी दूसरी साइट पर मसरूफ़ हैं तो 1 दबाइए। छुट्टी पर हैं तो 2 दबाइए। सामान या गाड़ी का मसला है तो 3 दबाइए। दूसरी वजह के लिए 4 दबाइए।",
-        "reject_reason_recorded": "शुक्रिया। आपकी वजह दर्ज कर ली गई है। टिकट आगे भेजा जाएगा। ख़ुदा हाफ़िज़।",
+        "reject_reason_recorded": "शुक्रिया। आपकी वजह दर्ज कर ली गई है। टास्क आगे भेजा जाएगा। ख़ुदा हाफ़िज़।",
         "invalid": "माज़रत, यह दुरुस्त इंतिख़ाब नहीं है।",
         "noinput": "हमें कोई जवाब नहीं मिला। ख़ुदा हाफ़िज़।",
         "goodbye": "ख़ुदा हाफ़िज़।",
@@ -112,9 +112,9 @@ LANGS = {
         "menu": "हिंदी के लिए {n} दबाएं।",
         "alarm": " अलार्म {a}।",
         "greet": "नमस्ते।", "greet_name": "नमस्ते {rname}।",
-        "technician": "{greet} यह ऑटोमेशन एज हेल्पडेस्क है। टिकट {t} आपको सौंपा गया है, साइट {s}।{alarm} "
-                      "टिकट स्वीकार करने के लिए {ack} दबाएं। अस्वीकार करने के लिए {rej} दबाएं।",
-        "escalation": "{greet} यह हेल्पडेस्क एस्केलेशन है। टिकट {t}, साइट {s}।{alarm} "
+        "technician": "{greet} यह शबक्कत हेल्पडेस्क है। टास्क {t} आपको सौंपा गया है, साइट {s}।{alarm} "
+                      "टास्क स्वीकार करने के लिए {ack} दबाएं। अस्वीकार करने के लिए {rej} दबाएं।",
+        "escalation": "{greet} यह हेल्पडेस्क एस्केलेशन है। टास्क {t}, साइट {s}।{alarm} "
                       "तकनीशियन {name} {reason}।",
         "escalation_question": "क्या यह अलर्ट किसी दूसरे तकनीशियन को सौंप दिया जाए? "
                                "हाँ के लिए {ack} दबाएं। नहीं के लिए {rej} दबाएं।",
@@ -122,18 +122,18 @@ LANGS = {
         "reassign_no": "धन्यवाद। यह अलर्ट दूसरे तकनीशियन को नहीं सौंपा जाएगा। अलविदा।",
         "reason_rejected": "ने असाइनमेंट अस्वीकार कर दिया है",
         "reason_no_ack": "ने {n} कॉल के बाद भी असाइनमेंट स्वीकार नहीं किया",
-        "emergency_technician": "{greet} यह एक इमरजेंसी अलर्ट है। टिकट {t}, अलर्ट आईडी {alert_id}। "
+        "emergency_technician": "{greet} यह एक इमरजेंसी अलर्ट है। टास्क {t}, अलर्ट आईडी {alert_id}। "
                                 "साइट {s}। गंभीरता {severity}। समस्या: {desc}। "
                                 "कृपया तुरंत कार्रवाई करें।",
-        "emergency_escalation": "{greet} यह टिकट {t} का इमरजेंसी एस्केलेशन है। तकनीशियन {name} {reason}। कृपया कार्रवाई करें या तकनीशियन से समीक्षा करने को कहें।",
+        "emergency_escalation": "{greet} यह टास्क {t} का इमरजेंसी एस्केलेशन है। तकनीशियन {name} {reason}। कृपया कार्रवाई करें या तकनीशियन से समीक्षा करने को कहें।",
         "emergency_reason_no_answer": "ने कॉल का जवाब नहीं दिया",
         "emergency_reason_rejected": "ने असाइनमेंट अस्वीकार कर दिया है",
-        "reminder": "हेल्पडेस्क रिमाइंडर। टिकट {t}, साइट {s}, पर आपका स्टेटस अपडेट बाकी है। "
+        "reminder": "हेल्पडेस्क रिमाइंडर। टास्क {t}, साइट {s}, पर आपका स्टेटस अपडेट बाकी है। "
                     "कृपया नेक्स्ट टास्क में डिपार्टेड, अराइव्ड या स्टार्टेड अपडेट करें।",
         "ack": "धन्यवाद। आपकी स्वीकृति दर्ज कर ली गई है। अलविदा।",
-        "reject": "आपका अस्वीकार दर्ज कर लिया गया है। टिकट आगे भेजा जाएगा। अलविदा।",
+        "reject": "आपका अस्वीकार दर्ज कर लिया गया है। टास्क आगे भेजा जाएगा। अलविदा।",
         "reject_reason_prompt": "अस्वीकार करने का कारण चुनें। किसी अन्य साइट पर व्यस्त हैं तो 1 दबाएं। छुट्टी पर हैं तो 2 दबाएं। उपकरण या वाहन की समस्या है तो 3 दबाएं। अन्य कारण के लिए 4 दबाएं।",
-        "reject_reason_recorded": "धन्यवाद। आपका कारण दर्ज कर लिया गया है। टिकट आगे भेजा जाएगा। अलविदा।",
+        "reject_reason_recorded": "धन्यवाद। आपका कारण दर्ज कर लिया गया है। टास्क आगे भेजा जाएगा। अलविदा।",
         "invalid": "क्षमा करें, यह मान्य विकल्प नहीं है।",
         "noinput": "हमें कोई इनपुट नहीं मिला। अलविदा।",
         "goodbye": "अलविदा।",
