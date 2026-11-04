@@ -671,7 +671,8 @@ def dashboard_html():
         for c in v.get("calls", []):
             role_title = f"{safe_esc(c.get('role', 'Technician')).capitalize()} #{c.get('attempt_no', 1)}"
             c_status = safe_esc(c.get("status") or "unknown")
-            c_lang = safe_esc(c.get("language") or "-")
+            c_lang_raw = c.get("language")
+            c_lang = safe_esc(full_lang_name(c_lang_raw) if c_lang_raw and c_lang_raw != "-" else "-")
             c_dtmf = safe_esc(str(c.get("dtmf") or "-"))
             c_resp = safe_esc(c.get("response") or "-")
             c_phone = safe_esc(c.get("to_number") or "")
@@ -909,10 +910,22 @@ def dashboard_html():
               <div><span class="summary-label">Summary:</span> {safe_esc(cw.get('response_summary') or 'No call response yet.')}</div>
               <div class="followup-info">Follow-up: <b>{safe_esc(v.get('followup', {}).get('state') or 'None')}</b></div>
             </div>
-            <div class="calls-timeline">
-              {calls_html or '<div class="no-calls">No voice call attempts recorded.</div>'}
-            </div>
-            {f'<div class="wa-container">{wa_html}</div>' if wa_html else ''}
+            <details class="events-dropdown">
+              <summary class="events-dropdown-summary">
+                <div class="events-summary-left">
+                  <svg class="events-caret" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="6 9 12 15 18 9"></polyline></svg>
+                  <span class="events-summary-title">Call & Event Activity</span>
+                  <span class="events-count-badge">{len(v.get('calls', [])) + len(wa_msgs)} event(s)</span>
+                </div>
+                <span class="events-hint">Click to toggle event details</span>
+              </summary>
+              <div class="events-dropdown-content">
+                <div class="calls-timeline">
+                  {calls_html or '<div class="no-calls">No voice call attempts recorded.</div>'}
+                </div>
+                {f'<div class="wa-container">{wa_html}</div>' if wa_html else ''}
+              </div>
+            </details>
           </div>
           <div class="card-footer">
             <span>Event Timestamp: <b>{time_str}</b></span>
@@ -1638,6 +1651,84 @@ def dashboard_html():
       border-radius: 4px;
       font-size: 10px;
     }}
+    /* Collapsible Events Dropdown */
+    .events-dropdown {{
+      margin-top: 10px;
+      border: 1px solid #e2e8f0;
+      border-radius: 8px;
+      background: #ffffff;
+      overflow: hidden;
+      transition: border-color 0.15s ease, box-shadow 0.15s ease;
+    }}
+    .events-dropdown:hover {{
+      border-color: #cbd5e1;
+    }}
+    .events-dropdown[open] {{
+      border-color: #bfdbfe;
+      box-shadow: 0 1px 3px rgba(37,99,235,0.06);
+    }}
+    .events-dropdown-summary {{
+      padding: 9px 13px;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      user-select: none;
+      background: #f8fafc;
+      font-size: 12px;
+      font-weight: 600;
+      color: #334155;
+      list-style: none;
+      transition: background 0.15s ease;
+    }}
+    .events-dropdown-summary::-webkit-details-marker {{
+      display: none;
+    }}
+    .events-dropdown-summary:hover {{
+      background: #f1f5f9;
+      color: #0f172a;
+    }}
+    .events-dropdown[open] .events-dropdown-summary {{
+      border-bottom: 1px solid #e2e8f0;
+      background: #eff6ff;
+      color: #1e40af;
+    }}
+    .events-summary-left {{
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }}
+    .events-caret {{
+      transition: transform 0.2s ease;
+    }}
+    .events-dropdown[open] .events-caret {{
+      transform: rotate(180deg);
+    }}
+    .events-summary-title {{
+      font-weight: 600;
+    }}
+    .events-count-badge {{
+      font-size: 11px;
+      font-weight: 600;
+      padding: 1px 7px;
+      border-radius: 10px;
+      background: #e2e8f0;
+      color: #475569;
+    }}
+    .events-dropdown[open] .events-count-badge {{
+      background: #dbeafe;
+      color: #1d4ed8;
+    }}
+    .events-hint {{
+      font-size: 11px;
+      font-weight: 500;
+      color: #94a3b8;
+    }}
+    .events-dropdown-content {{
+      padding: 10px 12px;
+      background: #ffffff;
+    }}
+
     .no-calls {{
       font-size: 12.5px;
       color: #94a3b8;
