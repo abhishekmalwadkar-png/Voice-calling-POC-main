@@ -726,7 +726,7 @@ def trigger_emergency(ticket_id, alarm_id, assignment_id, site_name, description
     """Emergency workflow:
     1. Technician receives a voice call (1 attempt only, no retries).
     2. Team Leader receives a voice call (1 attempt only, no retries).
-    3. Team Leader and Manager receive WhatsApp alert messages (Manager receives NO voice calls).
+    3. Technician, Team Leader and Manager receive SMS alert messages (Manager receives NO voice calls).
     """
     with ticket_lock(ticket_id):
         t = get_ticket(ticket_id)
@@ -773,9 +773,9 @@ def trigger_emergency(ticket_id, alarm_id, assignment_id, site_name, description
             cid = _place_call(t, "technician", 1, "uc1_technician")
             calls_placed["technician"] = cid
 
-        # 2. WhatsApp alerts sent directly to Team Leader and Technician
+        # 2. SMS alerts sent directly to Technician, Team Leader and Manager
         wa_recipients = []
-        for role in ("technician", "team_leader"):
+        for role in ("technician", "team_leader", "manager"):
             rec_role = merged.get(role)
             if rec_role and rec_role.get("mobile"):
                 send_whatsapp_alert(t, role, rec_role, alert_type_override="Emergency")
