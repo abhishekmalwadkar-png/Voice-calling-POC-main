@@ -505,6 +505,20 @@ def safe_esc(val):
         return ""
     return html.escape(str(val), quote=True)
 
+def full_lang_name(code):
+    if not code:
+        return "English"
+    c = str(code).strip().lower()
+    mapping = {
+        "en": "English",
+        "ar": "Arabic",
+        "hi": "Hindi",
+        "ur": "Urdu",
+        "es": "Spanish",
+        "fr": "French",
+    }
+    return mapping.get(c, code.capitalize() if len(code) > 2 else c.upper())
+
 def dashboard_html():
     tickets = queries.list_tickets({"limit": 1000})
     total_tickets = len(tickets)
@@ -750,7 +764,7 @@ def dashboard_html():
                   <div class="tech-sub-name">{safe_esc(prev_name)}</div>
                   <div class="tech-sub-meta">
                     <span class="meta-tag">Mobile: <b class="mono-val">{safe_esc(prev_mob)}</b></span>
-                    <span class="meta-tag">Language: <b>{safe_esc(prev_lang)}</b></span>
+                    <span class="meta-tag">Language: <b>{safe_esc(full_lang_name(prev_lang))}</b></span>
                     <span class="meta-tag">Prev Assignment ID: <b class="mono-val">{safe_esc(prev_aid)}</b></span>
                   </div>
                 </div>
@@ -762,7 +776,7 @@ def dashboard_html():
                   <div class="tech-sub-name">{safe_esc(curr_name)}</div>
                   <div class="tech-sub-meta">
                     <span class="meta-tag">Mobile: <b class="mono-val">{safe_esc(curr_mob)}</b></span>
-                    <span class="meta-tag">Language: <b>{safe_esc(curr_lang)}</b></span>
+                    <span class="meta-tag">Language: <b>{safe_esc(full_lang_name(curr_lang))}</b></span>
                     <span class="meta-tag">New Assignment ID: <b class="mono-val">{safe_esc(curr_aid)}</b></span>
                   </div>
                 </div>
@@ -776,7 +790,7 @@ def dashboard_html():
                 <div class="tech-sub-name" style="margin-bottom:0;">{safe_esc(curr_name)}</div>
                 <div class="tech-sub-meta">
                   <span class="meta-tag">Mobile: <b class="mono-val">{safe_esc(curr_mob)}</b></span>
-                  <span class="meta-tag">Language: <b>{safe_esc(curr_lang)}</b></span>
+                  <span class="meta-tag">Language: <b>{safe_esc(full_lang_name(curr_lang))}</b></span>
                   <span class="meta-tag">Assignment ID: <b class="mono-val">{safe_esc(curr_aid)}</b></span>
                 </div>
               </div>
@@ -827,25 +841,25 @@ def dashboard_html():
             "initial_assignment": {
                 "name": (prev_name if is_reassigned else curr_name),
                 "mobile": (prev_mob if is_reassigned else curr_mob),
-                "language": (prev_lang if is_reassigned else curr_lang),
+                "language": full_lang_name(prev_lang if is_reassigned else curr_lang),
                 "assignment_id": (prev_aid if is_reassigned else curr_aid)
             },
             "reassignment": {
                 "name": curr_name,
                 "mobile": curr_mob,
-                "language": curr_lang,
+                "language": full_lang_name(curr_lang),
                 "assignment_id": curr_aid,
                 "reassigned_at": time_str
             } if is_reassigned else None,
             "team_leader": {
                 "name": (recips.get("team_leader") or {}).get("name") or "-",
                 "mobile": (recips.get("team_leader") or {}).get("mobile") or "-",
-                "language": (recips.get("team_leader") or {}).get("language") or "-"
+                "language": full_lang_name((recips.get("team_leader") or {}).get("language") or "ar")
             },
             "manager": {
                 "name": (recips.get("manager") or {}).get("name") or "-",
                 "mobile": (recips.get("manager") or {}).get("mobile") or "-",
-                "language": (recips.get("manager") or {}).get("language") or "-"
+                "language": full_lang_name((recips.get("manager") or {}).get("language") or "en")
             },
             "event_timestamp": time_str,
             "last_event_id": v.get("last_event_id") or "-"
@@ -2136,7 +2150,7 @@ def dashboard_html():
 
       <div class="chart-card">
         <div class="chart-header">
-          <div class="chart-title">Incident Severity Breakdown</div>
+          <div class="chart-title">Task Severity Breakdown</div>
           <div class="chart-subtitle">Risk classification distribution across operational sites</div>
         </div>
         <div class="chart-container">
@@ -2688,6 +2702,13 @@ def dashboard_html():
 
         title.innerText = 'Task ' + data.task_id + ' - Assignment Details';
 
+        var fullLang = function(l) {{
+          if (!l) return 'English';
+          var c = String(l).toLowerCase().trim();
+          var m = {{ 'en': 'English', 'ar': 'Arabic', 'hi': 'Hindi', 'ur': 'Urdu', 'es': 'Spanish', 'fr': 'French' }};
+          return m[c] || (l.length > 2 ? (l.charAt(0).toUpperCase() + l.slice(1)) : l.toUpperCase());
+        }};
+
         var reassignHtml = '';
         if (data.is_reassigned && data.reassignment) {{
           reassignHtml = 
@@ -2702,7 +2723,7 @@ def dashboard_html():
                   '<div style="font-size:14px;font-weight:600;color:#0f172a;margin-bottom:6px;">' + data.initial_assignment.name + '</div>' +
                   '<div style="font-size:12px;color:#475569;display:flex;flex-direction:column;gap:4px;">' +
                     '<div>Mobile: <b style="font-family:monospace;">' + data.initial_assignment.mobile + '</b></div>' +
-                    '<div>Language: <b>' + data.initial_assignment.language + '</b></div>' +
+                    '<div>Language: <b>' + fullLang(data.initial_assignment.language) + '</b></div>' +
                     '<div>Previous Assignment ID: <b style="font-family:monospace;">' + data.initial_assignment.assignment_id + '</b></div>' +
                   '</div>' +
                 '</div>' +
@@ -2711,7 +2732,7 @@ def dashboard_html():
                   '<div style="font-size:14px;font-weight:600;color:#0f172a;margin-bottom:6px;">' + data.reassignment.name + '</div>' +
                   '<div style="font-size:12px;color:#475569;display:flex;flex-direction:column;gap:4px;">' +
                     '<div>Mobile: <b style="font-family:monospace;">' + data.reassignment.mobile + '</b></div>' +
-                    '<div>Language: <b>' + data.reassignment.language + '</b></div>' +
+                    '<div>Language: <b>' + fullLang(data.reassignment.language) + '</b></div>' +
                     '<div>New Assignment ID: <b style="font-family:monospace;">' + data.reassignment.assignment_id + '</b></div>' +
                   '</div>' +
                 '</div>' +
@@ -2725,7 +2746,7 @@ def dashboard_html():
                 '<div style="font-size:14px;font-weight:600;color:#0f172a;margin-bottom:6px;">' + data.initial_assignment.name + '</div>' +
                 '<div style="font-size:12px;color:#475569;display:grid;grid-template-columns:1fr 1fr;gap:8px;">' +
                   '<div>Mobile: <b style="font-family:monospace;">' + data.initial_assignment.mobile + '</b></div>' +
-                  '<div>Language: <b>' + data.initial_assignment.language + '</b></div>' +
+                  '<div>Language: <b>' + fullLang(data.initial_assignment.language) + '</b></div>' +
                   '<div>Assignment ID: <b style="font-family:monospace;">' + data.initial_assignment.assignment_id + '</b></div>' +
                   '<div>Reassignment Status: <b style="color:#059669;">Initial Assignment (Not Reassigned)</b></div>' +
                 '</div>' +
@@ -2740,12 +2761,12 @@ def dashboard_html():
               '<div style="background:#fff;border:1px solid #e2e8f0;border-radius:6px;padding:10px;">' +
                 '<div style="font-size:11px;font-weight:700;color:#64748b;text-transform:uppercase;margin-bottom:4px;">Team Leader</div>' +
                 '<div style="font-size:13px;font-weight:600;color:#0f172a;margin-bottom:4px;">' + data.team_leader.name + '</div>' +
-                '<div style="font-size:11.5px;color:#64748b;">Mobile: <b style="font-family:monospace;">' + data.team_leader.mobile + '</b> &bull; Lang: <b>' + data.team_leader.language + '</b></div>' +
+                '<div style="font-size:11.5px;color:#64748b;">Mobile: <b style="font-family:monospace;">' + data.team_leader.mobile + '</b> &bull; Language: <b>' + fullLang(data.team_leader.language) + '</b></div>' +
               '</div>' +
               '<div style="background:#fff;border:1px solid #e2e8f0;border-radius:6px;padding:10px;">' +
                 '<div style="font-size:11px;font-weight:700;color:#64748b;text-transform:uppercase;margin-bottom:4px;">Operations Manager</div>' +
                 '<div style="font-size:13px;font-weight:600;color:#0f172a;margin-bottom:4px;">' + data.manager.name + '</div>' +
-                '<div style="font-size:11.5px;color:#64748b;">Mobile: <b style="font-family:monospace;">' + data.manager.mobile + '</b> &bull; Lang: <b>' + data.manager.language + '</b></div>' +
+                '<div style="font-size:11.5px;color:#64748b;">Mobile: <b style="font-family:monospace;">' + data.manager.mobile + '</b> &bull; Language: <b>' + fullLang(data.manager.language) + '</b></div>' +
               '</div>' +
             '</div>' +
           '</div>';
