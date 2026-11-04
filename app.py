@@ -2499,6 +2499,7 @@ def dashboard_html():
 
     function resetAllFilters() {{
       var elSearch = document.getElementById('searchInput'); if (elSearch) elSearch.value = '';
+      var elSev = document.getElementById('filterSeverity'); if (elSev) elSev.value = 'all';
       var elFrom = document.getElementById('filterFromDate'); if (elFrom) elFrom.value = '';
       var elTo = document.getElementById('filterToDate'); if (elTo) elTo.value = '';
       var elWf = document.getElementById('filterWorkflow'); if (elWf) elWf.value = 'all';
@@ -2594,6 +2595,9 @@ def dashboard_html():
         var elWa = document.getElementById('filterWaStatus');
         var fWa = (elWa ? elWa.value : 'all').toLowerCase();
 
+        var elSev = document.getElementById('filterSeverity');
+        var fSev = (elSev ? elSev.value : 'all').toLowerCase();
+
         var cards = document.querySelectorAll('.ticket-card');
         var matchedCards = [];
 
@@ -2606,6 +2610,7 @@ def dashboard_html():
           var ack = (card.getAttribute('data-ack') || '').toLowerCase();
           var unresolved = (card.getAttribute('data-unresolved') || '').toLowerCase();
           var waStatus = (card.getAttribute('data-wastatus') || '').toLowerCase();
+          var sev = (card.getAttribute('data-severity') || '').toLowerCase();
           var text = (card.getAttribute('data-search') || '').toLowerCase();
 
           // 1. Quick View Pill matching
@@ -2650,16 +2655,27 @@ def dashboard_html():
           // 7. Acknowledgement matching
           var ackMatch = (fAck === 'all' || ack === fAck);
 
-          // 8. WhatsApp delivery status matching
+          // 8. WhatsApp / SMS delivery status matching
           var waMatch = (fWa === 'all' || waStatus.indexOf(fWa) !== -1);
 
-          if (catMatch && searchMatch && dateMatch && wfMatch && langMatch && outcomeMatch && ackMatch && waMatch) {{
+          // 9. Severity matching
+          var sevMatch = (fSev === 'all');
+          if (!sevMatch) {{
+            if (fSev === 'minor') {{
+              sevMatch = (sev === 'minor' || sev === 'normal' || sev === 'low');
+            }} else {{
+              sevMatch = (sev === fSev);
+            }}
+          }}
+
+          if (catMatch && searchMatch && dateMatch && wfMatch && langMatch && outcomeMatch && ackMatch && waMatch && sevMatch) {{
             matchedCards.push(card);
           }} else {{
             card.style.display = 'none';
           }}
         }});
 
+        window.__matchedCards = matchedCards;
         var totalMatched = matchedCards.length;
         var totalPages = Math.ceil(totalMatched / PAGE_SIZE) || 1;
         if (currentPage > totalPages) currentPage = totalPages;
@@ -2684,7 +2700,7 @@ def dashboard_html():
         // Update active filter feedback banner
         var banner = document.getElementById('filterFeedbackBanner');
         if (banner) {{
-          var hasActiveFilter = (q !== '' || fromDate !== '' || toDate !== '' || fWf !== 'all' || fLang !== 'all' || fOutcome !== 'all' || fAck !== 'all' || fWa !== 'all' || activeCategory !== 'all');
+          var hasActiveFilter = (q !== '' || fromDate !== '' || toDate !== '' || fWf !== 'all' || fLang !== 'all' || fOutcome !== 'all' || fAck !== 'all' || fWa !== 'all' || fSev !== 'all' || activeCategory !== 'all');
           if (hasActiveFilter) {{
             var filterTags = [];
             if (activeCategory !== 'all') filterTags.push('Category: ' + activeCategory.toUpperCase());
@@ -2697,6 +2713,7 @@ def dashboard_html():
             if (fOutcome !== 'all') filterTags.push('Outcome: ' + fOutcome);
             if (fAck !== 'all') filterTags.push('Ack: ' + (fAck === 'true' ? 'Yes' : 'No'));
             if (fWa !== 'all') filterTags.push('SMS: ' + fWa);
+            if (fSev !== 'all') filterTags.push('Severity: ' + fSev.toUpperCase());
 
             banner.innerHTML = '<div><b>Active Filter:</b> ' + filterTags.join(' &bull; ') + ' &mdash; Showing <b>' + totalMatched + '</b> matching task(s)</div>' +
                                '<button type="button" onclick="resetAllFilters()" style="background:#2563eb;color:#fff;border:none;padding:4px 10px;border-radius:4px;font-size:11.5px;font-weight:600;cursor:pointer;">Reset</button>';
@@ -2713,6 +2730,62 @@ def dashboard_html():
     }}
 
     // Chronological Audit Timeline Inspection Modal
+
+    function exportFilteredCsv() {{
+      try {{
+        var cards = window.__matchedCards;
+        if (!cards || !cards.length) {{
+          cards = Array.from(document.querySelectorAll('.ticket-card'));
+        }}
+        if (!cards || !cards.length) {{
+          alert('No tasks available to export.');
+          return;
+        }}
+
+        var headers = ['Task ID', 'Severity', 'Category', 'Timestamp', 'Language', 'Outcome', 'Workflow', 'Acknowledged', 'Unresolved Escalation', 'Details'];
+        var rows = [headers];
+
+        cards.forEach(function(card) {{
+          var tid = card.getAttribute('data-tid') || '';
+          var sev = (card.getAttribute('data-severity') || '').toUpperCase();
+          var cat = (card.getAttribute('data-category') || '').toUpperCase();
+          var ts = card.getAttribute('data-ts') || '';
+          var lang = (card.getAttribute('data-lang') || '').toUpperCase();
+          var outcome = card.getAttribute('data-outcome') || '';
+          var wf = card.getAttribute('data-wf') || '';
+          var ack = (card.getAttribute('data-ack') === 'true') ? 'YES' : 'NO';
+          var unres = (card.getAttribute('data-unresolved') === 'true') ? 'YES' : 'NO';
+          var searchDetails = (card.getAttribute('data-search') || '').replace(/\s+/g, ' ').trim();
+
+          rows.push([tid, sev, cat, ts, lang, outcome, wf, ack, unres, searchDetails]);
+        }});
+
+        var csvLines = rows.map(function(row) {{
+          return row.map(function(field) {{
+            var str = String(field || '');
+            if (str.indexOf(',') !== -1 || str.indexOf('"') !== -1 || str.indexOf('\n') !== -1) {{
+              str = '"' + str.replace(/"/g, '""') + '"';
+            }}
+            return str;
+          }}).join(',');
+        }}).join('\r\n');
+
+        var blob = new Blob(['\uFEFF' + csvLines], {{ type: 'text/csv;charset=utf-8;' }});
+        var url = URL.createObjectURL(blob);
+        var link = document.createElement('a');
+        var nowStr = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+        link.setAttribute('href', url);
+        link.setAttribute('download', 'NexTask_Tasks_Export_' + nowStr + '.csv');
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        URL.revokeObjectURL(url);
+      }} catch (err) {{
+        console.error('Export CSV error:', err);
+        alert('Failed to export CSV: ' + err.message);
+      }}
+    }}
+
     function openTimeline(tid) {{
       var modal = document.getElementById('timelineModal');
       var title = document.getElementById('timelineModalTitle');
@@ -2957,6 +3030,19 @@ def dashboard_html():
               scales: {{
                 y: {{ beginAtZero: true, ticks: {{ precision: 0, font: {{ family: 'Inter', size: 11 }} }}, grid: {{ color: '#f1f5f9' }} }},
                 x: {{ grid: {{ display: false }}, ticks: {{ font: {{ family: 'Inter', size: 11 }} }} }}
+              }},
+              onClick: function(evt, elements) {{
+                if (elements && elements.length > 0) {{
+                  var idx = elements[0].index;
+                  var labels = ['minor', 'major', 'critical', 'emergency'];
+                  var elSev = document.getElementById('filterSeverity');
+                  if (elSev && labels[idx]) {{
+                    elSev.value = labels[idx];
+                    runFilter();
+                    var sec = document.getElementById('ticketsSection');
+                    if (sec) sec.scrollIntoView({{ behavior: 'smooth', block: 'start' }});
+                  }}
+                }}
               }}
             }}
           }});
