@@ -121,6 +121,8 @@ def normalize_event(p):
         if mobile and not E164.fullmatch(mobile):
             raise EventError(f"recipient '{role}' mobile must be E.164, e.g. +966500000000 (got '{mobile}')")
         lang = str(r.get("language") or "").strip().lower()
+        if lang:
+            lang = _normalize_lang(lang, default="en")
         if lang and lang != "ask" and lang not in texts.LANGS:
             raise EventError(f"recipient '{role}' language must be one of {', '.join(texts.LANGS)} or 'ask'")
         recipients[role] = {"name": str(r.get("name") or "").strip(), "mobile": mobile, "language": lang,
