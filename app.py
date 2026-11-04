@@ -218,6 +218,17 @@ def legacy_call(form):
         workflow._stop_all(t, "CANCELLED_REASSIGNED", "STOPPED_REASSIGNED", "superseded by new API call")
         t = store.get_ticket(tid)
 
+    # Only the DTMF keys may be overridden by the request (all other ticket data stays untouched)
+    req_ack = str(form.get("ack_digit") or "").strip()
+    req_rej = str(form.get("reject_digit") or "").strip()
+    dtmf_changes = {}
+    if re.fullmatch(r"[0-9]", req_ack):
+        dtmf_changes["ack_digit"] = req_ack
+    if re.fullmatch(r"[0-9]", req_rej):
+        dtmf_changes["reject_digit"] = req_rej
+    if dtmf_changes:
+        store.update_ticket(tid, **dtmf_changes)
+        t = store.get_ticket(tid)
     # Start call workflow using existing database ticket data without updating DB fields
     workflow._start_uc1(t)
     return 202, dict(legacy_view(tid), status_url=f"/api/call/{tid}")

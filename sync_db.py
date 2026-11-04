@@ -1,13 +1,14 @@
 """
 Syncs data from PostgreSQL (tb_tickets, tb_assignments, tb_voice_calls)
-into the local SQLite database (flm_calls.db) so that the live NexTask
-operations dashboard matches the PostgreSQL database 100%.
+into the call-workflow tables (tickets ...) of the PostgreSQL runtime schema so that the call flow
+matches the production tb_* tables.
 
 Usage:
-  python sync_db.py          # Syncs / updates tickets from PostgreSQL to SQLite
-  python sync_db.py --clean  # Clears SQLite test records first, then mirrors PostgreSQL exactly
+  python sync_db.py          # Syncs / updates tickets from tb_* into the runtime tables
+  python sync_db.py --clean  # Clears the runtime tables first, then mirrors tb_* exactly
 """
 
+import re
 import sys
 import json
 import logging
@@ -27,7 +28,7 @@ def sync(clean=False):
         return False
 
     if clean:
-        logger.info("Cleaning old SQLite records to match PostgreSQL 1-to-1...")
+        logger.info("Cleaning old runtime records to match PostgreSQL 1-to-1...")
         with store.DB_LOCK:
             store.connect()
             for t in ["tickets", "events", "calls", "jobs", "audit_log", "whatsapp_messages"]:
@@ -35,7 +36,7 @@ def sync(clean=False):
                     store.q(f"DELETE FROM {t}")
                 except Exception as e:
                     logger.warning(f"Notice deleting from {t}: {e}")
-        logger.info("SQLite store cleared.")
+        logger.info("Runtime tables cleared.")
 
     try:
         with conn.cursor() as cur:
@@ -58,7 +59,7 @@ def sync(clean=False):
                     assignment_id, ticket_id, previous_assignment_id,
                     technician_name, technician_mobile, preferred_language,
                     team_leader_details, manager_details, assignment_type, assignment_status,
-                    assigned_at
+                    assigned_at, dtmf_digit
                 FROM tb_assignments
                 ORDER BY ticket_id, assigned_at ASC NULLS LAST
             """)
@@ -169,7 +170,13 @@ def sync(clean=False):
                 )
                 synced += 1
 
-        logger.info(f"Sync complete! {synced} ticket(s) from PostgreSQL are now 100% in sync in SQLite store.")
+            # Use the acknowledge key stored on the assignment (only if the ticket has none yet)
+            _d = str(curr_asn.get("dtmf_digit") or "").strip()
+            _cur = store.get_ticket(tid)
+            if re.fullmatch(r"[0-9]", _d) and _cur and not _cur.get("ack_digit"):
+                store.update_ticket(tid, ack_digit=_d)
+
+        logger.info(f"Sync complete! {synced} ticket(s) from PostgreSQL are now 100% in sync in the runtime tables.")
         return True
     except Exception as e:
         logger.error(f"Error during synchronization: {e}", exc_info=True)
