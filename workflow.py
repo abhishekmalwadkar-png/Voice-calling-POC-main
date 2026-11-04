@@ -44,6 +44,7 @@ RESPONSE_TEXT = {
     "rejected": "rejected the assignment",
     "informed": "informed of emergency assignment",
     "reached": "picked up but did not press 1 or 9 (counted as no response)",
+    "told_follow_up": "answered and was told to follow up in NexTask",
     "reassign_yes": "answered: yes, assign the alert to another technician",
     "reassign_no": "answered: no, do not assign the alert to another technician",
     "reminder_delivered": "answered the reminder call",
@@ -956,11 +957,21 @@ def twiml_voice(cid, retry):
                                      greet=texts.greeting(lang, c["recipient_name"])) + " "
                     + texts.LANGS[lang]["escalation_question"].format(ack=_a, rej=_r))
         else:
-            reason_key = "reason_rejected" if t.get("esc_reason") == "rejected" else "reason_no_ack"
-            reason = texts.LANGS[lang][reason_key].format(n=t.get("esc_detail") or "")
-            text = (texts.voice_text(lang, "escalation", t, name=tech_name, reason=reason,
-                                     greet=texts.greeting(lang, c["recipient_name"])) + " "
-                    + texts.LANGS[lang]["escalation_question"].format(ack=_a, rej=_r))
+            # Information only (no key to press, no reassign question): tell the person to follow up in NexTask.
+            # Picking up and hearing the message ends the escalation (see _after_escalation_call).
+            L = texts.LANGS[lang]
+            rejected = t.get("esc_reason") == "rejected"
+            reason = L["reason_rejected" if rejected else "reason_no_ack"].format(n=t.get("esc_detail") or "")
+            if rejected:
+                # the decline reason is stored in English, so only speak it in an English call
+                outcome_text = (t.get("uc1_reject_reason") if lang == "en" and t.get("uc1_reject_reason")
+                                else L["outcome_declined"])
+            else:
+                outcome_text = L["outcome_no_answer"]
+            text = texts.voice_text(lang, "escalation", t, name=tech_name, reason=reason, outcome=outcome_text,
+                                    greet=texts.greeting(lang, c["recipient_name"]))
+            update_call(cid, outcome="told_follow_up")
+            return _twiml(texts.say(lang, text) + '<Pause length="1"/>' + texts.say(lang, L["goodbye"]) + "<Hangup/>")
         if c["outcome"] not in ("reassign_yes", "reassign_no"):
             update_call(cid, outcome="reached")
         gather = (f'<Gather input="dtmf" numDigits="1" timeout="8" method="POST" '
@@ -1151,7 +1162,7 @@ def _after_escalation_call(t, c, outcome):
     tid, n, role = t["ticket_id"], c["attempt_no"], c["role"]
     if t["uc1_state"] not in ("ESCALATING", "EMERGENCY_TRIGGERED"):
         return
-    if outcome in ("reassign_yes", "reassign_no"):
+    if outcome in ("reassign_yes", "reassign_no", "told_follow_up"):
         _finish_uc1(tid, "TL_REACHED" if role == "team_leader" else "MANAGER_REACHED")
         return
     is_emergency = _is_emergency_ticket(t)

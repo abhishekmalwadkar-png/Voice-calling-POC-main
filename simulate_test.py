@@ -230,44 +230,40 @@ c1 = calls_of("INC5")[0]
 assert c1["outcome"] == "not_picked_up" and c1["cause_code"] == "480" and c1["picked_up"] == 0, c1
 ok("2nd attempt: not picked up (cause 480 stored) -> retry after interval -> acknowledged")
 
-# p.5: reject -> TL call (press key to confirm) -> TL reached -> no manager call
+# p.5: reject -> TL call (information only: follow up in NexTask) -> TL reached -> no manager call
 assign("INC6", lang="en")
 answer(wait_call("INC6", "technician", 1), "9")
 tl = wait_call("INC6", "team_leader", 1, "uc1_escalation")
-xml = answer(tl, "5")
-assert "हेल्पडेस्क एस्केलेशन" in xml and "मुस्तरद" in xml and "दूसरे टेक्नीशियन" in xml, xml
-assert "हाँ के लिए 5 दबाइए" in xml and "नहीं के लिए 9 दबाइए" in xml and "नेक्स्ट टास्क" not in xml, xml
+xml = answer(tl)
+assert "हेल्पडेस्क एस्केलेशन" in xml and "मुस्तरद" in xml and "नेक्स्ट टास्क" in xml, xml
+assert "दबाइए" not in xml and "<Gather" not in xml and "दूसरे टेक्नीशियन" not in xml, xml
 state("INC6", "TL_REACHED")
 esc = view("INC6")["call_workflow"]["escalation"]
 assert esc["reason"] == "rejected" and esc["team_leader_reached"], esc
-assert esc["team_leader_decision"] == "assign_to_another_technician" == esc["reassign"], esc
+assert esc["team_leader_decision"] is None and esc["reassign"] is None, esc
 assert not calls_of("INC6", "uc1_escalation")[1:], "manager must not be called"
-ok("reject (9) -> TL called in Urdu, asked to reassign, pressed 5 (yes) -> TL_REACHED, no manager call")
+ok("reject (9) -> TL called in Urdu, told to follow up in NexTask (no reassign question) -> TL_REACHED, no manager call")
 
-# TL answers but presses nothing -> still reached (answered counts)
+# TL does not pick up -> manager is called; nobody picks up -> UNRESOLVED
 assign("INC7")
 answer(wait_call("INC7", "technician", 1), "9")
-answer(wait_call("INC7", "team_leader", 1, "uc1_escalation"))       # picks up, presses nothing
-answer(wait_call("INC7", "manager", 1, "uc1_escalation"), "9")         # so the manager is called
+no_answer(wait_call("INC7", "team_leader", 1, "uc1_escalation"))
+answer(wait_call("INC7", "manager", 1, "uc1_escalation"))
 state("INC7", "MANAGER_REACHED")
 esc = view("INC7")["call_workflow"]["escalation"]
-assert esc["team_leader_reached"] is True and esc["team_leader_decision"] is None, esc
-assert esc["manager_decision"] == "do_not_reassign" == esc["reassign"], esc
+assert esc["team_leader_reached"] is False and esc["manager_reached"] is True and esc["reassign"] is None, esc
 assign("INC7C")
 answer(wait_call("INC7C", "technician", 1), "9")
-answer(wait_call("INC7C", "team_leader", 1, "uc1_escalation"))
-answer(wait_call("INC7C", "manager", 1, "uc1_escalation"))
-answer(wait_call("INC7C", "manager", 2, "uc1_escalation"))
+no_answer(wait_call("INC7C", "team_leader", 1, "uc1_escalation"))
+no_answer(wait_call("INC7C", "manager", 1, "uc1_escalation"))
+no_answer(wait_call("INC7C", "manager", 2, "uc1_escalation"))
 state("INC7C", "ESCALATION_UNRESOLVED")
 assign("INC7B")
 answer(wait_call("INC7B", "technician", 1), "9")
-answer(wait_call("INC7B", "team_leader", 1, "uc1_escalation"), "9")
+answer(wait_call("INC7B", "team_leader", 1, "uc1_escalation"))
 state("INC7B", "TL_REACHED")
-esc = view("INC7B")["call_workflow"]["escalation"]
-assert esc["team_leader_decision"] == "do_not_reassign" == esc["reassign"], esc
 assert not [c for c in calls_of("INC7B") if c["role"] == "manager"]
-ok("TL picks up without a key -> manager called (9 -> do_not_reassign); no key anywhere -> UNRESOLVED; "
-   "TL presses 9 -> do_not_reassign, manager not called")
+ok("TL no answer -> manager called; nobody answers -> UNRESOLVED; TL picks up -> TL_REACHED, manager not called")
 
 # 2 technician misses -> TL no answer -> manager attempt 1 busy -> attempt 2 answered
 assign("INC8")
@@ -275,15 +271,16 @@ no_answer(wait_call("INC8", "technician", 1))
 no_answer(wait_call("INC8", "technician", 2))
 no_answer(wait_call("INC8", "team_leader", 1, "uc1_escalation"))
 no_answer(wait_call("INC8", "manager", 1, "uc1_escalation"), "busy")
-xml = answer(wait_call("INC8", "manager", 2, "uc1_escalation"), "5")
-assert "Should we assign this alert to another technician? Press 5 for yes. Press 9 for no." in xml, xml
-assert "follow up in NexTask" not in xml, xml
+xml = answer(wait_call("INC8", "manager", 2, "uc1_escalation"))
+assert "The technician has not acknowledged after 2 call attempts." in xml, xml
+assert "Latest contact outcome: No answer." in xml and "Please follow up in NexTask." in xml, xml
+assert "Should we assign" not in xml and "<Gather" not in xml, xml
 state("INC8", "MANAGER_REACHED")
 v = view("INC8")
 esc = v["call_workflow"]["escalation"]
 assert esc["reason"] == "no_acknowledgement" and esc["technician_calls"] == 2, esc
 assert esc["team_leader_reached"] is False and esc["manager_reached"], esc
-assert esc["manager_decision"] == "assign_to_another_technician" == esc["reassign"], esc
+assert esc["manager_decision"] is None and esc["reassign"] is None, esc
 assert "Manager: call 1 line was busy" in v["call_workflow"]["response_summary"], v["call_workflow"]
 ok("no ack x2 -> TL not answered -> manager busy -> manager attempt 2 answered -> MANAGER_REACHED")
 
@@ -493,7 +490,7 @@ assert (rec["technician"]["language"], rec["team_leader"]["language"], rec["mana
 xml = answer(wait_call("LANG1", "technician", 1), "9")
 assert "Polly.Zeina" in xml and "/twilio/lang" not in xml, xml
 xml = twilio(f"/twilio/voice?cid={wait_call('LANG1', 'team_leader', 1, 'uc1_escalation')}", {})
-assert 'language="hi-IN"' in xml and "दूसरे टेक्नीशियन" in xml, xml
+assert 'language="hi-IN"' in xml and "नेक्स्ट टास्क" in xml and "दूसरे टेक्नीशियन" not in xml, xml
 code, res = http("POST", "/api/call", {"alert_id": "A", "ticket_id": "LANG2", "phone_number": "+911111111111",
                                        "site_details": "x", "language": "ar", "manager_number": "+913333333333",
                                        "manager_language": "en"})

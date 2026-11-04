@@ -21,14 +21,16 @@ LANGS = {
         "greet": "Hello.", "greet_name": "Hello {rname}.",
         "technician": "{greet} This is the Shabakkat helpdesk. Task {t} has been assigned to you, "
                       "at site {s}.{alarm} Press {ack} to acknowledge this task. Press {rej} to reject it.",
-        "escalation": "{greet} This is the Shabakkat helpdesk escalation. Task {t}, at site {s}.{alarm} "
-                      "The technician {name} {reason}.",
+        "escalation": "{greet} This is the Shabakkat helpdesk escalation. Task {t} at {s} is assigned to {name}. "
+                      "{reason} Latest contact outcome: {outcome}. Please follow up in NexTask.",
+        "outcome_no_answer": "No answer",
+        "outcome_declined": "Declined assignment",
         "escalation_question": "Should we assign this alert to another technician? "
                                "Press {ack} for yes. Press {rej} for no.",
         "reassign_yes": "Thank you. This alert will be assigned to another technician. Goodbye.",
         "reassign_no": "Thank you. This alert will not be assigned to another technician. Goodbye.",
-        "reason_rejected": "has rejected the assignment",
-        "reason_no_ack": "has not acknowledged the assignment after {n} calls",
+        "reason_rejected": "The technician has rejected the assignment.",
+        "reason_no_ack": "The technician has not acknowledged after {n} call attempts.",
         "emergency_technician": "{greet} This is an emergency alert. Task {t}, alert ID {alert_id}, "
                                 "at {s}. Severity: {severity}. Issue: {desc}. "
                                 "Please take action immediately.",
@@ -52,13 +54,15 @@ LANGS = {
         "greet": "مرحبا.", "greet_name": "مرحبا {rname}.",
         "technician": "{greet} هذا مكتب المساعدة من شبكات. تم تعيين المهمة {t} لك، في الموقع {s}.{alarm} "
                       "اضغط {ack} لتأكيد الاستلام. اضغط {rej} للرفض.",
-        "escalation": "{greet} هذا تصعيد من مكتب المساعدة. المهمة {t}، في الموقع {s}.{alarm} "
-                      "الفني {name} {reason}.",
+        "escalation": "{greet} هذا تصعيد من مكتب المساعدة. المهمة {t} في الموقع {s} مسندة إلى الفني {name}. "
+                      "{reason} آخر نتيجة تواصل: {outcome}. يرجى المتابعة في نكست تاسك.",
+        "outcome_no_answer": "لا يوجد رد",
+        "outcome_declined": "رفض المهمة",
         "escalation_question": "هل نُسند هذا التنبيه إلى فني آخر؟ اضغط {ack} للموافقة. اضغط {rej} للرفض.",
         "reassign_yes": "شكرا لك. سيتم إسناد هذا التنبيه إلى فني آخر. مع السلامة.",
         "reassign_no": "شكرا لك. لن يتم إسناد هذا التنبيه إلى فني آخر. مع السلامة.",
-        "reason_rejected": "رفض المهمة",
-        "reason_no_ack": "لم يؤكد استلام المهمة بعد {n} مكالمات",
+        "reason_rejected": "رفض الفني المهمة.",
+        "reason_no_ack": "لم يؤكد الفني الاستلام بعد {n} محاولات اتصال.",
         "emergency_technician": "{greet} هذا تنبيه طوارئ. المهمة {t}، برقم التنبيه {alert_id}. "
                                 "الموقع {s}. مستوى الخطورة {severity}. المشكلة: {desc}. "
                                 "يرجى اتخاذ الإجراء فورا.",
@@ -83,14 +87,16 @@ LANGS = {
         "greet": "अस्सलाम-ओ-अलैकुम।", "greet_name": "अस्सलाम-ओ-अलैकुम {rname}।",
         "technician": "{greet} यह शबक्कत हेल्पडेस्क है। टास्क {t} आपको दिया गया है, साइट {s}।{alarm} "
                       "टास्क क़ुबूल करने के लिए {ack} दबाइए। मुस्तरद करने के लिए {rej} दबाइए।",
-        "escalation": "{greet} यह हेल्पडेस्क एस्केलेशन है। टास्क {t}, साइट {s}।{alarm} "
-                       "टेक्नीशियन {name} {reason}।",
+        "escalation": "{greet} यह हेल्पडेस्क एस्केलेशन है। टास्क {t}, साइट {s} पर टेक्नीशियन {name} को दिया गया है। "
+                       "{reason} आख़िरी राब्ते का नतीजा: {outcome}। बराए मेहरबानी नेक्स्ट टास्क में फ़ॉलो-अप कीजिए।",
+        "outcome_no_answer": "कोई जवाब नहीं",
+        "outcome_declined": "असाइनमेंट मुस्तरद",
         "escalation_question": "क्या यह अलर्ट किसी दूसरे टेक्नीशियन को दे दिया जाए? "
                                 "हाँ के लिए {ack} दबाइए। नहीं के लिए {rej} दबाइए।",
         "reassign_yes": "शुक्रिया। यह अलर्ट दूसरे टेक्नीशियन को दे दिया जाएगा। ख़ुदा हाफ़िज़।",
         "reassign_no": "शुक्रिया। यह अलर्ट दूसरे टेक्नीशियन को नहीं दिया जाएगा। ख़ुदा हाफ़िज़।",
-        "reason_rejected": "ने असाइनमेंट मुस्तरद कर दिया है",
-        "reason_no_ack": "ने {n} कॉल के बाद भी असाइनमेंट क़ुबूल नहीं किया",
+        "reason_rejected": "टेक्नीशियन ने असाइनमेंट मुस्तरद कर दिया है।",
+        "reason_no_ack": "टेक्नीशियन ने {n} कॉल के बाद भी असाइनमेंट क़ुबूल नहीं किया।",
         "emergency_technician": "{greet} यह एक इमरजेंसी अलर्ट है। टास्क {t}, अलर्ट आईडी {alert_id}। "
                                 "साइट {s}। गंभीरता {severity}। मसला: {desc}। "
                                 "बराए मेहरबानी फ़ौरन कार्रवाई कीजिए।",
@@ -114,14 +120,16 @@ LANGS = {
         "greet": "नमस्ते।", "greet_name": "नमस्ते {rname}।",
         "technician": "{greet} यह शबक्कत हेल्पडेस्क है। टास्क {t} आपको सौंपा गया है, साइट {s}।{alarm} "
                       "टास्क स्वीकार करने के लिए {ack} दबाएं। अस्वीकार करने के लिए {rej} दबाएं।",
-        "escalation": "{greet} यह हेल्पडेस्क एस्केलेशन है। टास्क {t}, साइट {s}।{alarm} "
-                      "तकनीशियन {name} {reason}।",
+        "escalation": "{greet} यह हेल्पडेस्क एस्केलेशन है। टास्क {t}, साइट {s} पर तकनीशियन {name} को सौंपा गया है। "
+                      "{reason} अंतिम संपर्क का परिणाम: {outcome}। कृपया नेक्स्ट टास्क में फॉलो-अप करें।",
+        "outcome_no_answer": "कोई उत्तर नहीं",
+        "outcome_declined": "असाइनमेंट अस्वीकार",
         "escalation_question": "क्या यह अलर्ट किसी दूसरे तकनीशियन को सौंप दिया जाए? "
                                "हाँ के लिए {ack} दबाएं। नहीं के लिए {rej} दबाएं।",
         "reassign_yes": "धन्यवाद। यह अलर्ट दूसरे तकनीशियन को सौंप दिया जाएगा। अलविदा।",
         "reassign_no": "धन्यवाद। यह अलर्ट दूसरे तकनीशियन को नहीं सौंपा जाएगा। अलविदा।",
-        "reason_rejected": "ने असाइनमेंट अस्वीकार कर दिया है",
-        "reason_no_ack": "ने {n} कॉल के बाद भी असाइनमेंट स्वीकार नहीं किया",
+        "reason_rejected": "तकनीशियन ने असाइनमेंट अस्वीकार कर दिया है।",
+        "reason_no_ack": "तकनीशियन ने {n} कॉल के बाद भी असाइनमेंट स्वीकार नहीं किया।",
         "emergency_technician": "{greet} यह एक इमरजेंसी अलर्ट है। टास्क {t}, अलर्ट आईडी {alert_id}। "
                                 "साइट {s}। गंभीरता {severity}। समस्या: {desc}। "
                                 "कृपया तुरंत कार्रवाई करें।",
