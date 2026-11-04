@@ -744,3 +744,152 @@ def ticket_exists_pg(ticket_id):
         return False
     finally:
         release_connection(conn)
+
+
+# --------------------------------------------------------------------------- dashboard (read-only)
+def _iso(value):
+    return value.isoformat() if hasattr(value, "isoformat") else value
+
+
+def _person(details, language=None):
+    """tb_assignments.team_leader_details / manager_details (jsonb) -> {name, mobile, language}."""
+    if isinstance(details, str):
+        try:
+            details = json.loads(details)
+        except ValueError:
+            details = None
+    if isinstance(details, list):
+        details = details[0] if details and isinstance(details[0], dict) else None
+    if not isinstance(details, dict):
+        return None
+
+    def pick(*keys):
+        return next((str(details[k]) for k in keys if details.get(k) not in (None, "")), "")
+
+    return {"name": pick("name", "teamleader_name", "team_leader_name", "manager_name"),
+            "mobile": pick("mobile", "mobile_number", "phone_number", "teamleader_mobile", "manager_mobile"),
+            "language": pick("language", "preferred_language", "preferred_lang") or language or ""}
+
+
+def dashboard_data(limit=1000):
+    """Everything the dashboard shows, read from the PostgreSQL tb_* tables only (not flm_calls.db).
+
+    Returns {"tickets": [...], "wa_total", "wa_delivered", "calls_total", "calls_completed",
+    "calls_failed"}, with each ticket shaped the way the dashboard expects. Returns None when
+    PostgreSQL cannot be reached. The live call-workflow state is not stored in PostgreSQL, so it is
+    derived here from the assignment status and the voice call rows."""
+    conn = get_connection()
+    if not conn:
+        return None
+    try:
+        from psycopg2.extras import RealDictCursor
+        with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            cur.execute("SELECT * FROM public.tb_tickets ORDER BY updated_at DESC NULLS LAST LIMIT %s", (int(limit),))
+            tickets = cur.fetchall()
+            ids = [t["ticket_id"] for t in tickets]
+            assignments, calls, wa = [], [], []
+            if ids:
+                cur.execute("SELECT * FROM public.tb_assignments WHERE ticket_id = ANY(%s) "
+                            "ORDER BY assigned_at NULLS FIRST, assignment_id", (ids,))
+                assignments = cur.fetchall()
+                aids = [a["assignment_id"] for a in assignments]
+                if aids:
+                    cur.execute("SELECT * FROM public.tb_voice_calls WHERE assignment_id = ANY(%s) ORDER BY id", (aids,))
+                    calls = cur.fetchall()
+                cur.execute("SELECT * FROM public.tb_whatsapp_messages WHERE ticket_id = ANY(%s) ORDER BY id", (ids,))
+                wa = cur.fetchall()
+            cur.execute("SELECT COUNT(*) AS n FROM public.tb_whatsapp_messages")
+            wa_total = cur.fetchone()["n"]
+            cur.execute("SELECT COUNT(*) AS n FROM public.tb_whatsapp_messages "
+                        "WHERE LOWER(delivery_status) IN ('delivered','read')")
+            wa_delivered = cur.fetchone()["n"]
+            cur.execute("SELECT COUNT(*) AS n FROM public.tb_voice_calls")
+            calls_total = cur.fetchone()["n"]
+            cur.execute("SELECT COUNT(*) AS n FROM public.tb_voice_calls WHERE LOWER(call_status)='completed'")
+            calls_completed = cur.fetchone()["n"]
+            cur.execute("SELECT COUNT(*) AS n FROM public.tb_voice_calls WHERE LOWER(call_status) IN "
+                        "('failed','busy','no-answer') OR failure_reason IS NOT NULL")
+            calls_failed = cur.fetchone()["n"]
+        conn.commit()
+    except Exception as e:
+        try:
+            conn.rollback()
+        except Exception:
+            pass
+        logger.error(f"Error reading dashboard data from PostgreSQL: {e}")
+        return None
+    finally:
+        release_connection(conn)
+
+    by_ticket, by_assignment = {}, {a["assignment_id"]: a for a in assignments}
+    for a in assignments:
+        by_ticket.setdefault(a["ticket_id"], []).append(a)
+    views = []
+    for t in tickets:
+        tid = t["ticket_id"]
+        cur_aid = t.get("current_assignment_id")
+        cur = by_assignment.get(cur_aid)
+        prev = by_assignment.get(cur.get("previous_assignment_id")) if cur else None
+        aids = {a["assignment_id"] for a in by_ticket.get(tid, [])}
+        recipients = {}
+        if cur:
+            recipients["technician"] = {"name": cur.get("technician_name") or "",
+                                        "mobile": cur.get("technician_mobile") or "",
+                                        "language": cur.get("preferred_language") or ""}
+            for role, key in (("team_leader", "team_leader_details"), ("manager", "manager_details")):
+                person = _person(cur.get(key), cur.get("preferred_language"))
+                if person:
+                    recipients[role] = person
+        if prev and (prev.get("technician_name") or prev.get("technician_mobile")):
+            recipients["previous_technician"] = {"name": prev.get("technician_name") or "",
+                                                 "mobile": prev.get("technician_mobile") or "",
+                                                 "language": prev.get("preferred_language") or "",
+                                                 "assignment_id": prev["assignment_id"]}
+        t_calls = []
+        for c in calls:
+            if c["assignment_id"] not in aids:
+                continue
+            digit_ok = str(c.get("dtmf_status") or "").upper() in ("ACCEPTED", "ACKNOWLEDGED")
+            t_calls.append({
+                "id": c["id"], "role": c.get("recipient_role") or "technician", "workflow": c.get("workflow_id") or "",
+                "attempt_no": c.get("attempt_number") or 1, "recipient_name": c.get("recipient_name"),
+                "to_number": c.get("mobile_number"), "language": c.get("language"),
+                "call_sid": c.get("provider_call_id"), "status": c.get("call_status"), "dtmf": c.get("captured_digit"),
+                "outcome": (c.get("dtmf_status") or "").lower() or None,
+                "response": "acknowledged" if digit_ok else (c.get("failure_reason") or c.get("dtmf_status") or "call in progress"),
+                "created_at": _iso(c.get("started_at")), "ended_at": _iso(c.get("ended_at")),
+                "superseded": c["assignment_id"] != cur_aid, "_ack": digit_ok})
+        live = [c for c in t_calls if not c["superseded"]]
+        acked = any(c["_ack"] for c in live) or \
+            str((cur or {}).get("assignment_status") or "").lower() in ("accepted", "acknowledged")
+        roles = {c["role"] for c in live}
+        if acked:
+            state = "ACKNOWLEDGED"
+        elif "manager" in roles:
+            state = "MANAGER_CALLED"
+        elif "team_leader" in roles:
+            state = "TEAM_LEADER_CALLED"
+        elif live:
+            state = "TECH_CALLING"
+        else:
+            state = ""
+        for c in t_calls:
+            c.pop("_ack", None)
+        views.append({
+            "ticket_id": tid, "alert_id": t.get("alert_id"), "alarm_id": t.get("alarm_id"), "assignment_id": cur_aid,
+            "site_number": t.get("site_number"), "site_name": t.get("site_name"), "severity": t.get("severity"),
+            "status": t.get("ticket_status"), "alarm_status": t.get("alarm_status"),
+            "operational_status": t.get("operational_status"), "description": t.get("issue_description"),
+            "created_at": _iso(t.get("opened_at")),
+            "last_event_time": _iso(t.get("last_event_at") or t.get("updated_at")),
+            "last_event_id": None, "recipients": recipients, "calls": t_calls, "acknowledged": acked,
+            "call_workflow": {"state": state, "acknowledged": acked, "response_summary": ""},
+            "followup": {},
+            "whatsapp_messages": [
+                {"recipient_role": w.get("recipient_role"), "recipient_name": w.get("recipient_name"),
+                 "mobile_number": w.get("mobile_number"), "template_name": w.get("template_name"),
+                 "delivery_status": w.get("delivery_status"), "provider_message_id": w.get("provider_message_id"),
+                 "sent_at": _iso(w.get("sent_at")), "submitted_at": _iso(w.get("submitted_at"))}
+                for w in wa if w["ticket_id"] == tid]})
+    return {"tickets": views, "wa_total": wa_total, "wa_delivered": wa_delivered, "calls_total": calls_total,
+            "calls_completed": calls_completed, "calls_failed": calls_failed}

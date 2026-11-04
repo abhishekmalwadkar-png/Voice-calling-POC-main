@@ -564,7 +564,12 @@ def full_lang_name(code):
     return mapping.get(c, code.capitalize() if len(code) > 2 else c.upper())
 
 def dashboard_html():
-    tickets = queries.list_tickets({"limit": 1000})
+    import pg_store
+    pg = pg_store.dashboard_data(1000)  # dashboard reads PostgreSQL only (not flm_calls.db)
+    if pg is None:
+        print(f"[{store.now_iso()}] - dashboard: PostgreSQL unreachable, showing no data", flush=True)
+        pg = {"tickets": [], "wa_total": 0, "wa_delivered": 0, "calls_total": 0, "calls_completed": 0, "calls_failed": 0}
+    tickets = pg["tickets"]
     total_tickets = len(tickets)
     ack_count = 0
     assigned_count = 0
@@ -577,26 +582,8 @@ def dashboard_html():
     minor_count = 0
     unresolved_count = 0
 
-    try:
-        wa_row = store.q("SELECT COUNT(*) as cnt FROM whatsapp_messages", one=True)
-        wa_total = wa_row["cnt"] if wa_row else 0
-        wa_deliv_row = store.q("SELECT COUNT(*) as cnt FROM whatsapp_messages WHERE delivery_status IN ('delivered', 'read')", one=True)
-        wa_delivered = wa_deliv_row["cnt"] if wa_deliv_row else 0
-    except Exception:
-        wa_total = 0
-        wa_delivered = 0
-
-    try:
-        call_total_row = store.q("SELECT COUNT(*) as cnt FROM calls", one=True)
-        calls_total = call_total_row["cnt"] if call_total_row else 0
-        call_comp_row = store.q("SELECT COUNT(*) as cnt FROM calls WHERE status='completed'", one=True)
-        calls_completed = call_comp_row["cnt"] if call_comp_row else 0
-        call_fail_row = store.q("SELECT COUNT(*) as cnt FROM calls WHERE status IN ('failed', 'busy', 'no-answer') OR error_message IS NOT NULL", one=True)
-        calls_failed = call_fail_row["cnt"] if call_fail_row else 0
-    except Exception:
-        calls_total = 0
-        calls_completed = 0
-        calls_failed = 0
+    wa_total, wa_delivered = pg["wa_total"], pg["wa_delivered"]
+    calls_total, calls_completed, calls_failed = pg["calls_total"], pg["calls_completed"], pg["calls_failed"]
 
     cards = ""
     for v in tickets:
@@ -621,27 +608,6 @@ def dashboard_html():
 
         prev_tech = recips.get("previous_technician")
         prev_name, prev_mob, prev_lang, prev_aid = "-", "-", "-", "-"
-        if is_reassigned and not prev_tech:
-            tid_lookup = v.get("ticket_id")
-            ev = store.q(
-                "SELECT payload FROM events WHERE ticket_id=? AND event_type IN ('ALERT_INGESTED', 'ASSIGNMENT_CREATED', 'ASSIGNMENT_INITIAL') ORDER BY rowid ASC LIMIT 1",
-                (tid_lookup,),
-                one=True
-            )
-            if ev and ev.get("payload"):
-                try:
-                    p = json.loads(ev["payload"])
-                    p_name = p.get("technician_name")
-                    if p_name and p_name != curr_name:
-                        prev_tech = {
-                            "name": p_name,
-                            "mobile": p.get("technician_mobile") or p.get("phone_number") or "-",
-                            "language": p.get("technician_preferred_lang") or p.get("technician_language") or "English",
-                            "assignment_id": f"{tid_lookup}-ASN1"
-                        }
-                except Exception:
-                    pass
-
         if prev_tech:
             is_reassigned = True
             prev_name = prev_tech.get("name") or "-"
