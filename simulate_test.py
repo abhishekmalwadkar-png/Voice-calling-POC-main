@@ -1,15 +1,15 @@
 """
-Offline end-to-end test of the call platform. Runs in DRY_RUN mode with a temporary database and plays
+End-to-end test of the call platform. Runs in DRY_RUN mode in a temporary PostgreSQL schema and plays
 Twilio's part by posting the same webhooks Twilio would. No real calls, no internet.
 
     python simulate_test.py
 """
+import atexit
 import hashlib
 import hmac
 import itertools
 import json
 import os
-import tempfile
 import threading
 import time
 import urllib.error
@@ -29,7 +29,9 @@ import twilio_client  # noqa: E402
 import workflow  # noqa: E402
 from config import CFG  # noqa: E402
 
-store.connect(os.path.join(tempfile.mkdtemp(), "test.db"))
+TEST_SCHEMA = f"flm_test_{os.getpid()}"
+store.connect(TEST_SCHEMA)  # throw-away schema in the configured PostgreSQL; dropped when the test ends
+atexit.register(store.drop_schema, TEST_SCHEMA)
 workflow.WEBHOOK_DELAYS = (0, 0.2, 0.2)
 server = app.Server(("127.0.0.1", 5055), app.Handler)
 threading.Thread(target=server.serve_forever, daemon=True).start()

@@ -278,7 +278,7 @@ Notice that the response includes **`event_id`** and **`event_timestamp`** at th
 
 ## 4.1 Push Records API (`/api/alerts`)
 
-Stores single or batch ticket/task records directly into both PostgreSQL (`tb_tickets`, `tb_assignments`, `tb_nextask_events`, `tb_audit_logs`) and SQLite databases. All 17 fields from `table (1).tsv` are required.
+Stores single or batch ticket/task records directly into PostgreSQL (`tb_tickets`, `tb_assignments`, `tb_nextask_events`, `tb_audit_logs`) and the call-workflow runtime tables. All 17 fields from `table (1).tsv` are required.
 
 * **Endpoint:** `/api/alerts` *(aliases: `/api/pushrecords`, `/api/push_records`)*
 * **Method:** `POST` or `PUT`

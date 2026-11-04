@@ -425,6 +425,9 @@ def _escalate(t, reason, tech_calls):
     tid = t["ticket_id"]
     _cancel_jobs(tid, ("tech_call",), f"escalation: {reason}")
     update_ticket(tid, uc1_state="ESCALATING", esc_reason=reason, esc_detail=str(tech_calls))
+    # Re-read the ticket so the SMS sees the new esc_reason / esc_detail (the old copy still has them empty, which
+    # made a rejection go out as a "No Answer" message with a default attempt count).
+    t = get_ticket(tid) or t
     audit(tid, "escalation_started", f"Escalation started: {reason} after {tech_calls} technician call(s)")
     notify(tid, "uc1.escalation_started", {"reason": reason, "technician_calls": tech_calls})
     r = t["recipients"]
@@ -540,6 +543,10 @@ def _place_call(t, role, attempt, workflow, send_wa=True):
     return cid
 
 
+_SMS_CLAIMED = set()
+_SMS_CLAIM_LOCK = threading.Lock()
+
+
 def send_sms_alert(t, role, rec, call_cid=None, alert_type_override=None, custom_note=None, delay_sec=None):
     """Send SMS alert via Twilio to Team Leader, Manager, or Technician (replacing WhatsApp)."""
     if not rec or not rec.get("mobile"):
@@ -551,6 +558,14 @@ def send_sms_alert(t, role, rec, call_cid=None, alert_type_override=None, custom
     is_emergency = (alert_type_override in ("Emergency", "Emergency Escalation") or
                     _is_emergency_ticket(t))
     alert_type = alert_type_override or ("Emergency" if is_emergency else "Escalation")
+    # Claim the send before the background thread starts. _escalate and _place_call both send to the same person
+    # within milliseconds, and the whatsapp_messages row is only written after the Twilio call returns, so the
+    # database check in _place_call alone let a second SMS through.
+    claim = (tid, t.get("assignment_id"), role, alert_type)
+    with _SMS_CLAIM_LOCK:
+        if claim in _SMS_CLAIMED:
+            return
+        _SMS_CLAIMED.add(claim)
     if custom_note:
         tech_line = custom_note
     elif is_emergency:

@@ -47,7 +47,8 @@ CFG = {
     "port": _int("PORT", 5000),
     "dry_run": _env("DRY_RUN", "0") == "1",
     "api_key": _env("API_KEY"),
-    "db_path": _env("DB_PATH", os.path.join(BASE_DIR, "flm_calls.db")),
+    # PostgreSQL schema holding the call-workflow tables (tickets, events, calls, jobs, audit_log, users ...)
+    "runtime_schema": _env("RUNTIME_SCHEMA", "flm_runtime"),
     # 360dialog WhatsApp
     "d360_api_key": _env("D360_API_KEY", "xCyHUYyCA24Dq6iWgISlP8hdAK"),
     "d360_api_url": _env("D360_API_URL", "https://waba-v2.360dialog.io/messages"),

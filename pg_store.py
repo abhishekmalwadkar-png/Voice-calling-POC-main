@@ -772,7 +772,7 @@ def _person(details, language=None):
 
 
 def dashboard_data(limit=1000):
-    """Everything the dashboard shows, read from the PostgreSQL tb_* tables only (not flm_calls.db).
+    """Everything the dashboard shows, read from the PostgreSQL tb_* tables only .
 
     Returns {"tickets": [...], "wa_total", "wa_delivered", "calls_total", "calls_completed",
     "calls_failed"}, with each ticket shaped the way the dashboard expects. Returns None when

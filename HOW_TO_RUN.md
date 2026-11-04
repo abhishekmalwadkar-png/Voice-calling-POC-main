@@ -179,4 +179,6 @@ Runs a full offline end-to-end test (DRY_RUN, temporary database on port 5055, f
 | `cloudflared did not return a public URL` | check internet / cloudflared install, or set `PUBLIC_BASE_URL` to an ngrok URL |
 | 401 / unauthorized on `/api/*` | send header `X-API-Key` equal to `API_KEY` in `.env` |
 
-Data is stored in `flm_calls.db` (SQLite) in this folder.
+All data is stored in PostgreSQL (`DB_HOST`, `DB_PORT`, `DB_NAME`, `DB_USER`, `DB_PASSWORD` in `.env`). The call-workflow tables
+(tickets, events, calls, jobs, audit_log, users, whatsapp_messages) are created automatically in the `flm_runtime` schema
+(change with `RUNTIME_SCHEMA`); there is no local database file. The server will not start if PostgreSQL is unreachable.

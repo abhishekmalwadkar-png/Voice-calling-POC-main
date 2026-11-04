@@ -1,6 +1,9 @@
-"""SQLite store: tickets (current-state projection), events, calls, timers (jobs) and the audit log."""
+"""PostgreSQL store: tickets (current-state projection), events, calls, timers (jobs), the audit log, users and
+WhatsApp messages. Everything lives in the PostgreSQL database configured by DB_HOST / DB_PORT / DB_NAME /
+DB_USER / DB_PASSWORD, in its own schema (RUNTIME_SCHEMA, default "flm_runtime") next to the production tb_* tables.
+There is no local database file: the app, the AutomationEdge API and the dashboard all use the same PostgreSQL."""
 import json
-import sqlite3
+import re
 import threading
 import time
 import hashlib
@@ -8,6 +11,13 @@ import secrets
 from datetime import datetime, timezone, timedelta
 
 from config import CFG
+
+try:
+    import psycopg2
+    from psycopg2 import pool as _pgpool
+    from psycopg2.extras import RealDictCursor
+except ImportError:  # pragma: no cover
+    psycopg2 = None
 
 LOCAL_TZ = timezone(timedelta(hours=5, minutes=30))  # IST (UTC+05:30)
 
@@ -17,21 +27,23 @@ _TICKET_LOCKS_GUARD = threading.Lock()
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS tickets (
+    seq BIGSERIAL,
     ticket_id TEXT PRIMARY KEY,
     alert_id TEXT, alarm_id TEXT, assignment_id TEXT, site_number TEXT, site_name TEXT, severity TEXT,
     status TEXT, alarm_status TEXT, operational_status TEXT, description TEXT,
     region TEXT, country_code TEXT,
     ack_digit TEXT, reject_digit TEXT, recipients TEXT, callback_url TEXT,
-    version INTEGER, last_event_id TEXT, last_event_time TEXT, last_event_received_at REAL,
+    version INTEGER, last_event_id TEXT, last_event_time TEXT, last_event_received_at DOUBLE PRECISION,
     uc1_assignment_id TEXT, uc1_state TEXT, uc1_reason TEXT, uc1_ack_via TEXT, uc1_ack_at TEXT,
     esc_reason TEXT, esc_detail TEXT, uc1_reject_reason TEXT,
     followup_state TEXT, followup_due_at TEXT,
     created_at TEXT, updated_at TEXT);
 CREATE TABLE IF NOT EXISTS events (
+    seq BIGSERIAL,
     event_id TEXT PRIMARY KEY, ticket_id TEXT, event_type TEXT, version INTEGER, event_time TEXT,
     received_at TEXT, result TEXT, note TEXT, payload TEXT);
 CREATE TABLE IF NOT EXISTS calls (
-    id INTEGER PRIMARY KEY AUTOINCREMENT, ticket_id TEXT, assignment_id TEXT, workflow TEXT,
+    id BIGSERIAL PRIMARY KEY, ticket_id TEXT, assignment_id TEXT, workflow TEXT,
     role TEXT, attempt_no INTEGER, recipient_name TEXT, to_number TEXT,
     language TEXT, language_source TEXT, template TEXT, template_version TEXT,
     call_sid TEXT, status TEXT, outcome TEXT, dtmf TEXT, ack_result TEXT, reject_reason TEXT, picked_up INTEGER,
@@ -39,14 +51,14 @@ CREATE TABLE IF NOT EXISTS calls (
     created_at TEXT, initiated_at TEXT, answered_at TEXT, ended_at TEXT,
     superseded TEXT, processed INTEGER DEFAULT 0);
 CREATE TABLE IF NOT EXISTS jobs (
-    id INTEGER PRIMARY KEY AUTOINCREMENT, ticket_id TEXT, assignment_id TEXT, kind TEXT,
-    attempt_no INTEGER, run_at REAL, status TEXT, note TEXT, created_at TEXT, updated_at TEXT);
+    id BIGSERIAL PRIMARY KEY, ticket_id TEXT, assignment_id TEXT, kind TEXT,
+    attempt_no INTEGER, run_at DOUBLE PRECISION, status TEXT, note TEXT, created_at TEXT, updated_at TEXT);
 CREATE TABLE IF NOT EXISTS audit_log (
-    id INTEGER PRIMARY KEY AUTOINCREMENT, ts TEXT, ticket_id TEXT, kind TEXT, message TEXT,
-    call_id INTEGER, event_id TEXT, data TEXT);
+    id BIGSERIAL PRIMARY KEY, ts TEXT, ticket_id TEXT, kind TEXT, message TEXT,
+    call_id BIGINT, event_id TEXT, data TEXT);
 CREATE TABLE IF NOT EXISTS users (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    username TEXT UNIQUE NOT NULL COLLATE NOCASE,
+    id BIGSERIAL PRIMARY KEY,
+    username TEXT NOT NULL,
     password_hash TEXT NOT NULL,
     salt TEXT NOT NULL,
     role TEXT DEFAULT 'admin',
@@ -58,9 +70,9 @@ CREATE TABLE IF NOT EXISTS auth_tokens (
     token TEXT PRIMARY KEY,
     username TEXT NOT NULL,
     created_at TEXT,
-    expires_at REAL);
+    expires_at DOUBLE PRECISION);
 CREATE TABLE IF NOT EXISTS whatsapp_messages (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    id BIGSERIAL PRIMARY KEY,
     workflow_id TEXT,
     ticket_id TEXT,
     assignment_id TEXT,
@@ -78,6 +90,9 @@ CREATE TABLE IF NOT EXISTS whatsapp_messages (
     delivered_at TEXT,
     read_at TEXT,
     failure_reason TEXT);
+CREATE UNIQUE INDEX IF NOT EXISTS ux_users_username ON users (LOWER(username));
+CREATE INDEX IF NOT EXISTS idx_tickets_alert ON tickets (LOWER(alert_id));
+CREATE INDEX IF NOT EXISTS idx_tickets_alarm ON tickets (LOWER(alarm_id));
 CREATE INDEX IF NOT EXISTS idx_calls_ticket ON calls(ticket_id);
 CREATE INDEX IF NOT EXISTS idx_whatsapp_ticket ON whatsapp_messages(ticket_id);
 CREATE INDEX IF NOT EXISTS idx_jobs_due ON jobs(status, run_at);
@@ -85,62 +100,140 @@ CREATE INDEX IF NOT EXISTS idx_audit_ticket ON audit_log(ticket_id);
 CREATE INDEX IF NOT EXISTS idx_tokens_expires ON auth_tokens(expires_at);
 """
 
-_conn = None
+# Tables whose INSERT hands back the generated id (what SQLite called lastrowid)
+_ID_TABLES = {"calls", "jobs", "audit_log", "users", "whatsapp_messages"}
+# INSERT OR REPLACE -> INSERT ... ON CONFLICT (<key>) DO UPDATE; value = (conflict target, column to leave out)
+_CONFLICT_KEY = {"events": ("event_id", "event_id"),
+                 "users": ("(LOWER(username))", "username"),
+                 "auth_tokens": ("token", "token")}
+
+_pool = None
+_schema = None
 
 
-def connect(path=None):
-    """(Re)open the database. Tests call this with a temporary path."""
-    global _conn
+def _schema_name(name=None):
+    name = str(name or CFG.get("runtime_schema") or "flm_runtime").strip()
+    if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", name):
+        raise ValueError(f"invalid runtime schema name: {name!r}")
+    return name
+
+
+def _dsn_kwargs():
+    return dict(host=CFG.get("pg_host") or "localhost", port=int(CFG.get("pg_port") or 5432),
+                dbname=CFG.get("pg_name") or "FLM-Helpdesk", user=CFG.get("pg_user") or "postgres",
+                password=CFG.get("pg_password") or "root", connect_timeout=10)
+
+
+def connect(schema=None):
+    """(Re)open the PostgreSQL pool and make sure the runtime schema and tables exist. Tests pass their own schema."""
+    global _pool, _schema
+    if psycopg2 is None:
+        raise RuntimeError("psycopg2 is not installed; run: pip install psycopg2-binary")
     with DB_LOCK:
-        if _conn:
-            _conn.close()
-        _conn = sqlite3.connect(path or CFG["db_path"], check_same_thread=False, isolation_level=None)
-        _conn.row_factory = sqlite3.Row
-        _keep_v1_tables()
-        _conn.executescript(SCHEMA)
-        # Safe column additions for existing tables
-        _cols_t = [r[1] for r in _conn.execute("PRAGMA table_info(tickets)")]
-        if "uc1_reject_reason" not in _cols_t:
-            _conn.execute("ALTER TABLE tickets ADD COLUMN uc1_reject_reason TEXT")
-        if "alert_id" not in _cols_t:
-            _conn.execute("ALTER TABLE tickets ADD COLUMN alert_id TEXT")
-        if "region" not in _cols_t:
-            _conn.execute("ALTER TABLE tickets ADD COLUMN region TEXT")
-        if "country_code" not in _cols_t:
-            _conn.execute("ALTER TABLE tickets ADD COLUMN country_code TEXT")
-        _cols_c = [r[1] for r in _conn.execute("PRAGMA table_info(calls)")]
-        if "reject_reason" not in _cols_c:
-            _conn.execute("ALTER TABLE calls ADD COLUMN reject_reason TEXT")
-        # Seed default user if none exists
-        count = _conn.execute("SELECT COUNT(*) FROM users").fetchone()[0]
-        if count == 0:
-            def_user = CFG.get("auth_username") or "admin"
-            def_pass = CFG.get("auth_password") or "admin123"
-            create_user(def_user, def_pass, role="admin", full_name="Administrator")
+        if _pool:
+            _pool.closeall()
+            _pool = None
+        name = _schema_name(schema)
+        kw = _dsn_kwargs()
+        try:
+            boot = psycopg2.connect(**kw)
+        except psycopg2.Error as e:
+            raise RuntimeError(f"Cannot connect to PostgreSQL ({kw['dbname']}@{kw['host']}:{kw['port']}): "
+                               f"{str(e).strip()} - check DB_HOST, DB_PORT, DB_NAME, DB_USER, DB_PASSWORD.") from e
+        try:
+            boot.autocommit = True
+            with boot.cursor() as cur:
+                cur.execute(f'CREATE SCHEMA IF NOT EXISTS "{name}"')
+                cur.execute(f'SET search_path TO "{name}", public')
+                cur.execute("SELECT pg_advisory_lock(727001)")  # two processes starting together must not race on DDL
+                try:
+                    cur.execute(SCHEMA)
+                finally:
+                    cur.execute("SELECT pg_advisory_unlock(727001)")
+        finally:
+            boot.close()
+        _schema = name
+        _pool = _pgpool.ThreadedConnectionPool(1, 20, options=f'-c search_path="{name}",public', **kw)
+        if (q("SELECT COUNT(*) AS n FROM users", one=True) or {}).get("n", 0) == 0:
+            create_user(CFG.get("auth_username") or "admin", CFG.get("auth_password") or "admin123",
+                        role="admin", full_name="Administrator")
 
 
-def _keep_v1_tables():
-    """The first POC used a different layout under the same table names: keep it as *_v1 tables."""
-    for table, new_column in (("tickets", "uc1_state"), ("events", "event_type")):
-        cols = [r[1] for r in _conn.execute(f"PRAGMA table_info({table})")]
-        if cols and new_column not in cols:
-            _conn.execute(f"ALTER TABLE {table} RENAME TO {table}_v1")
-            print(f"Kept the old '{table}' table as '{table}_v1'", flush=True)
+def drop_schema(schema):
+    """Remove a (test) schema and everything in it."""
+    global _pool
+    name = _schema_name(schema)
+    if name == _schema_name():
+        raise ValueError("refusing to drop the production runtime schema")
+    with DB_LOCK:
+        if _pool:
+            _pool.closeall()
+            _pool = None
+        c = psycopg2.connect(**_dsn_kwargs())
+        try:
+            c.autocommit = True
+            with c.cursor() as cur:
+                cur.execute(f'DROP SCHEMA IF EXISTS "{name}" CASCADE')
+        finally:
+            c.close()
+
+
+_RE_NOCASE = re.compile(r"([\w.]+)\s*=\s*\?\s+COLLATE\s+NOCASE", re.I)
+_RE_INSERT = re.compile(r"^\s*INSERT\s+(OR\s+(?:REPLACE|IGNORE)\s+)?INTO\s+(\w+)\s*\(([^)]*)\)", re.I)
+
+
+def _translate(sql):
+    """The SQLite-flavoured SQL used across the app -> PostgreSQL. Returns (sql, returns_id)."""
+    sql = _RE_NOCASE.sub(r"LOWER(\1)=LOWER(?)", sql)
+    sql = re.sub(r"\browid\b", "seq", sql, flags=re.I)
+    sql = sql.replace("%", "%%").replace("?", "%s")
+    returns_id = False
+    m = _RE_INSERT.match(sql)
+    if m:
+        mode, table, cols = (m.group(1) or "").strip().upper(), m.group(2).lower(), m.group(3)
+        if mode == "OR REPLACE":
+            sql = re.sub(r"INSERT\s+OR\s+REPLACE", "INSERT", sql, count=1, flags=re.I)
+            key = _CONFLICT_KEY.get(table)
+            if key:
+                names = [c.strip() for c in cols.split(",") if c.strip()]
+                sets = ", ".join(f"{c}=EXCLUDED.{c}" for c in names if c != key[1])
+                sql = sql.rstrip().rstrip(";") + f" ON CONFLICT ({key[0]}) DO UPDATE SET {sets}"
+        elif mode == "OR IGNORE":
+            sql = re.sub(r"INSERT\s+OR\s+IGNORE", "INSERT", sql, count=1, flags=re.I)
+            sql = sql.rstrip().rstrip(";") + " ON CONFLICT DO NOTHING"
+        if table in _ID_TABLES:
+            sql += " RETURNING id"
+            returns_id = True
+    return sql, returns_id
+
+
+def _adapt(args):
+    return tuple(int(a) if isinstance(a, bool) else a for a in args)
 
 
 def q(sql, args=(), one=False):
     """Run one statement. INSERT returns the new row id, UPDATE/DELETE the affected row count."""
-    global _conn
-    if _conn is None:
+    if _pool is None:
         connect()
-    with DB_LOCK:
-        cur = _conn.execute(sql, args)
-        head = sql.lstrip()[:6].upper()
-        if head == "INSERT":
-            return cur.lastrowid
-        if head in ("UPDATE", "DELETE"):
-            return cur.rowcount
-        rows = [dict(r) for r in cur.fetchall()]
+    text, returns_id = _translate(sql)
+    conn = _pool.getconn()
+    broken = False
+    try:
+        conn.autocommit = True
+        with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            cur.execute(text, _adapt(args))
+            head = sql.lstrip()[:6].upper()
+            if head == "INSERT":
+                row = cur.fetchone() if returns_id else None
+                return row["id"] if row else None
+            if head in ("UPDATE", "DELETE"):
+                return cur.rowcount
+            rows = [dict(r) for r in cur.fetchall()]
+    except psycopg2.OperationalError:
+        broken = True
+        raise
+    finally:
+        _pool.putconn(conn, close=broken or bool(conn.closed))
     return (rows[0] if rows else None) if one else rows
 
 
