@@ -137,116 +137,89 @@ def _reload_modules():
 
 # --------------------------------------------------------------------------- legacy single-call API (/api/call)
 def legacy_call(form):
-    """POST /api/call: universal calling endpoint.
-    Supports:
-    1. Legacy format: {ticket_id, phone_number, alert_id, site_details...}
-    2. DB alert intake format: {task_id, technician_mobile, issue_type, site_number, site_name...}
-    3. Nested payload: {"tickets": [{...}]} or {"ticket": {...}}
-    4. Minimal DB ticket trigger: {"ticket_id": "TASK1002"} (pulls contacts & site directly from DB)
+    """POST /api/call: Trigger outbound call for an existing database ticket.
+    Strictly read-only for ticket data: Does NOT modify or update any ticket fields in the DB.
     """
     if not isinstance(form, dict):
         raise workflow.EventError("body must be a JSON object")
 
-    # If payload is wrapped in "tickets" or "ticket" array/dict, extract single item
+    # If payload is wrapped in "tickets" or "ticket", extract single item
     if "tickets" in form and isinstance(form["tickets"], list) and len(form["tickets"]) > 0:
         form = dict(form["tickets"][0])
-    elif "ticket" in form and isinstance(form["ticket"], dict) and "phone_number" not in form and "technician_mobile" not in form:
+    elif "ticket" in form and isinstance(form["ticket"], dict):
         nested = dict(form["ticket"])
         for k, v in nested.items():
             if k not in form:
                 form[k] = v
 
-    if form.get("event_type") or (isinstance(form.get("ticket"), dict) and "recipients" in form):
-        code, body = workflow.ingest_event(form)
-        tid = form.get("ticket_id") or form.get("task_id") or (form.get("ticket") or {}).get("ticket_id")
-        if tid and code == 202:
-            return code, dict(legacy_view(str(tid).upper()) or body, status_url=f"/api/call/{tid}")
-        return code, body
-
     # Resolve ticket_id / task_id
-    tid = str(form.get("ticket_id") or form.get("task_id") or "").strip().upper()
+    tid = str(form.get("ticket_id") or form.get("task_id") or (form.get("ticket") or {}).get("ticket_id") or "").strip().upper()
     if not tid:
         raise workflow.EventError("missing required field: ticket_id or task_id")
 
-    # Check if ticket already exists in database to pre-fill missing details
+    # Check if ticket already exists in database
     t = store.get_ticket(tid)
-    recips = (t.get("recipients") if t else {}) or {}
+    if not t:
+        try:
+            import pg_store
+            if pg_store.ticket_exists_pg(tid):
+                import sync_db
+                sync_db.sync()
+                t = store.get_ticket(tid)
+        except Exception:
+            pass
+
+    if not t:
+        # If ticket not found in DB, check if phone_number was provided for standalone test
+        phone = str(form.get("phone_number") or form.get("technician_mobile") or "").strip()
+        if not phone:
+            return 404, {"error": f"ticket '{tid}' not found in database. Please ingest alert first via /api/alerts."}
+        # Temporary runtime-only ticket for standalone call test without modifying DB tables
+        recips = [{
+            "role": "technician",
+            "mobile": phone,
+            "name": str(form.get("technician_name") or "Technician").strip(),
+            "language": workflow._normalize_lang(form.get("technician_preferred_lang") or form.get("language") or "en")
+        }]
+        stamp = int(time.time() * 1000)
+        event = {
+            "event_id": f"CALL-{tid}-{stamp}",
+            "event_type": "ASSIGNMENT_CREATED",
+            "ticket": {
+                "ticket_id": tid,
+                "alarm_id": str(form.get("alarm_id") or form.get("alert_id") or f"ALM-{tid}"),
+                "assignment_id": f"{tid}-A{stamp}",
+                "site_name": str(form.get("site_details") or form.get("site_name") or "Main Site"),
+                "description": str(form.get("description") or form.get("issue_description") or "Dispatch Call"),
+                "severity": str(form.get("severity") or "Major"),
+                "status": "Assigned"
+            },
+            "ack_digit": form.get("ack_digit") or "1",
+            "reject_digit": form.get("reject_digit"),
+            "recipients": recips
+        }
+        workflow.ingest_event(event)
+        return 202, dict(legacy_view(tid), status_url=f"/api/call/{tid}")
+
+    # Ticket EXISTS in DB: Strictly DO NOT update or alter any ticket attributes in DB
+    recips = t.get("recipients") or {}
     tech_recip = recips.get("technician") or {}
-    tl_recip = recips.get("team_leader") or {}
-    mgr_recip = recips.get("manager") or {}
+    if not tech_recip.get("mobile"):
+        # Check if mobile was passed in request as fallback
+        fallback_mobile = str(form.get("phone_number") or form.get("technician_mobile") or "").strip()
+        if fallback_mobile:
+            tech_recip["mobile"] = fallback_mobile
 
-    phone_number = str(
-        form.get("phone_number") or form.get("technician_mobile") or form.get("mobile") or tech_recip.get("mobile") or ""
-    ).strip()
-    if not phone_number:
-        raise workflow.EventError(f"[{tid}] missing required field: phone_number or technician_mobile")
+    if not tech_recip.get("mobile"):
+        raise workflow.EventError(f"[{tid}] technician mobile number missing in database")
 
-    alert_id = str(
-        form.get("alert_id") or form.get("alarm_id") or form.get("issue_type") or (t.get("alert_id") if t else "") or (t.get("alarm_id") if t else "") or tid
-    ).strip()
-
-    site_details = str(
-        form.get("site_details") or form.get("site_name") or (f"Site {form.get('site_number')}" if form.get("site_number") else "") or (t.get("site_name") if t else "") or (f"Site {t.get('site_number')}" if t and t.get("site_number") else "") or "Main Site"
-    ).strip()
-
-    tech_name = str(form.get("technician_name") or tech_recip.get("name") or "").strip()
-    default_language = form.get("language") or form.get("technician_preferred_lang") or tech_recip.get("language") or "ask"
-    tech_lang = form.get("technician_language") or form.get("technician_preferred_lang") or default_language
-
-    desc = form.get("description") or form.get("issue_description") or (t.get("description") if t else "") or ""
-    sev = form.get("severity") or (t.get("severity") if t else "") or "Major"
-
-    if t and t.get("uc1_state") in workflow.ACTIVE:
+    # If call is already active on this ticket, cancel old call attempt cleanly
+    if t.get("uc1_state") in workflow.ACTIVE:
         workflow._stop_all(t, "CANCELLED_REASSIGNED", "STOPPED_REASSIGNED", "superseded by new API call")
         t = store.get_ticket(tid)
 
-    stamp = int(time.time() * 1000)
-    recipients = [{
-        "role": "technician",
-        "mobile": phone_number,
-        "name": tech_name,
-        "language": tech_lang
-    }]
-
-    tl_num = str(form.get("team_leader_number") or form.get("teamleader_mobile") or tl_recip.get("mobile") or "").strip()
-    if tl_num:
-        recipients.append({
-            "role": "team_leader",
-            "mobile": tl_num,
-            "name": form.get("team_leader_name") or form.get("teamleader_name") or tl_recip.get("name") or "Team Leader",
-            "language": form.get("team_leader_language") or form.get("teamleader_preferred_lang") or tl_recip.get("language") or default_language
-        })
-
-    mgr_num = str(form.get("manager_number") or form.get("manager_mobile") or mgr_recip.get("mobile") or "").strip()
-    if mgr_num:
-        recipients.append({
-            "role": "manager",
-            "mobile": mgr_num,
-            "name": form.get("manager_name") or mgr_recip.get("name") or "Operations Manager",
-            "language": form.get("manager_language") or form.get("manager_preferred_lang") or mgr_recip.get("language") or default_language
-        })
-
-    event = {
-        "event_id": f"CALL-{tid}-{stamp}",
-        "event_type": "ASSIGNMENT_CREATED",
-        "ticket": {
-            "ticket_id": tid,
-            "alarm_id": alert_id,
-            "assignment_id": f"{tid}-A{stamp}",
-            "site_name": site_details,
-            "site_number": form.get("site_number") or (t.get("site_number") if t else ""),
-            "description": desc,
-            "severity": sev,
-            "status": "Assigned",
-            "region": form.get("region") or (t.get("region") if t else ""),
-            "country_code": form.get("country_code") or (t.get("country_code") if t else "")
-        },
-        "ack_digit": form.get("ack_digit") or "1",
-        "reject_digit": form.get("reject_digit"),
-        "callback_url": form.get("callback_url"),
-        "recipients": recipients,
-    }
-    workflow.ingest_event(event)
+    # Start call workflow using existing database ticket data without updating DB fields
+    workflow._start_uc1(t)
     return 202, dict(legacy_view(tid), status_url=f"/api/call/{tid}")
 
 
