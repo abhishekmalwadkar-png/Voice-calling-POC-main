@@ -851,10 +851,15 @@ def dashboard_html():
             "last_event_id": v.get("last_event_id") or "-"
         }
         task_json_str = html.escape(json.dumps(task_details_obj), quote=True)
+        sev_rank = {"Emergency": 4, "Critical": 3, "Major": 2}.get(severity, 1)
 
         cards += f"""
-        <div class="ticket-card" 
-             data-category="{filter_cat}" 
+        <div class="ticket-card"
+             data-tid="{safe_esc(v.get('ticket_id'))}"
+             data-severity="{safe_esc(severity.lower())}"
+             data-sevrank="{sev_rank}"
+             data-ts="{time_str}"
+             data-category="{filter_cat}"
              data-date="{date_iso}"
              data-lang="{lang_attr}"
              data-outcome="{outcome_attr}"
@@ -904,6 +909,11 @@ def dashboard_html():
 
     ack_rate = f"{int((ack_count / total_tickets) * 100)}%" if total_tickets > 0 else "0%"
     mode = "DRY RUN (Simulator)" if CFG["dry_run"] else f"LIVE GATEWAY - {safe_esc(CFG.get('base_url') or 'Connected')}"
+    dash_stats_json = json.dumps({
+        "status": [assigned_count, reassigned_count, pending_count, escalated_count, ack_count],
+        "severity": [minor_count, major_count, critical_count, emergency_count],
+        "activity": [calls_total, calls_completed, wa_total],
+    })
 
     return f"""<!doctype html>
 <html lang="en">
@@ -1823,6 +1833,172 @@ def dashboard_html():
       font-size: 13.5px;
       display: none;
     }}
+
+    /* Live Refresh Bar */
+    .live-bar {{
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 10px;
+      margin-bottom: 16px;
+    }}
+    .live-status {{
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 12px;
+      color: #64748b;
+    }}
+    .live-status b {{ color: #1e293b; font-family: 'JetBrains Mono', monospace; font-weight: 600; }}
+    .live-dot {{
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: #94a3b8;
+    }}
+    .live-dot.on {{
+      background: #16a34a;
+      box-shadow: 0 0 0 0 rgba(22, 163, 74, 0.5);
+      animation: livePulse 2s infinite;
+    }}
+    .live-dot.err {{ background: #dc2626; }}
+    @keyframes livePulse {{
+      0% {{ box-shadow: 0 0 0 0 rgba(22, 163, 74, 0.45); }}
+      70% {{ box-shadow: 0 0 0 7px rgba(22, 163, 74, 0); }}
+      100% {{ box-shadow: 0 0 0 0 rgba(22, 163, 74, 0); }}
+    }}
+    .live-controls {{
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex-wrap: wrap;
+    }}
+    .ctl-select {{
+      padding: 6px 8px;
+      border: 1px solid #cbd5e1;
+      border-radius: 6px;
+      font-size: 12px;
+      font-family: inherit;
+      background: #fff;
+      color: #334155;
+    }}
+    .ctl-select:focus {{ outline: none; border-color: #0969da; }}
+    .ctl-btn {{
+      background: #ffffff;
+      color: #334155;
+      border: 1px solid #cbd5e1;
+      padding: 6px 12px;
+      border-radius: 6px;
+      font-size: 12px;
+      font-weight: 600;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+    }}
+    .ctl-btn:hover {{ background: #f1f5f9; border-color: #94a3b8; }}
+    .ctl-btn.on {{ background: #0969da; border-color: #0969da; color: #ffffff; }}
+    .ctl-btn:disabled {{ opacity: 0.55; cursor: wait; }}
+    .ctl-btn.spinning svg {{ animation: spin 0.8s linear infinite; }}
+    @keyframes spin {{ to {{ transform: rotate(360deg); }} }}
+
+    /* Results Toolbar */
+    .results-toolbar {{
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 10px;
+      margin-bottom: 12px;
+    }}
+    .results-count {{ font-size: 12.5px; color: #64748b; }}
+    .results-count b {{ color: #0f172a; }}
+    .results-controls {{
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex-wrap: wrap;
+    }}
+    .ctl-label {{
+      font-size: 11px;
+      font-weight: 600;
+      color: #64748b;
+      text-transform: uppercase;
+      letter-spacing: 0.03em;
+    }}
+
+    /* Interactive states */
+    .metric-card.active {{
+      border-color: #0969da;
+      box-shadow: 0 0 0 3px rgba(9, 105, 218, 0.12);
+    }}
+    .metric-card.bump .metric-number {{ animation: bump 0.6s ease; }}
+    @keyframes bump {{
+      0% {{ transform: scale(1); }}
+      40% {{ transform: scale(1.18); color: #0969da; }}
+      100% {{ transform: scale(1); }}
+    }}
+    .chart-card canvas {{ cursor: pointer; }}
+    .chart-hint {{ font-size: 10.5px; color: #94a3b8; margin-top: 6px; text-align: right; }}
+    .ticket-card.is-new {{ animation: newFlash 2.4s ease; }}
+    @keyframes newFlash {{
+      0%, 40% {{ border-color: #16a34a; box-shadow: 0 0 0 3px rgba(22, 163, 74, 0.18); }}
+      100% {{ border-color: var(--border); box-shadow: 0 1px 3px rgba(0,0,0,0.03); }}
+    }}
+    body.compact .ticket-card .card-body,
+    body.compact .ticket-card .card-footer {{ display: none; }}
+    body.compact .ticket-card.expanded .card-body {{ display: block; }}
+    body.compact .ticket-card.expanded .card-footer {{ display: flex; }}
+    body.compact .ticket-card .card-header {{ cursor: pointer; border-bottom: none; }}
+    body.compact .ticket-card.expanded .card-header {{ border-bottom: 1px solid #f1f5f9; }}
+    .kbd {{
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 10.5px;
+      background: #f1f5f9;
+      border: 1px solid #cbd5e1;
+      border-bottom-width: 2px;
+      border-radius: 4px;
+      padding: 0 5px;
+      color: #475569;
+    }}
+
+    /* Toasts */
+    .toast-stack {{
+      position: fixed;
+      right: 20px;
+      bottom: 20px;
+      z-index: 2000;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      pointer-events: none;
+    }}
+    .toast {{
+      background: #0f172a;
+      color: #f8fafc;
+      padding: 10px 14px;
+      border-radius: 8px;
+      font-size: 12.5px;
+      box-shadow: 0 10px 20px rgba(0,0,0,0.18);
+      max-width: 360px;
+      opacity: 0;
+      transform: translateY(8px);
+      transition: opacity 0.2s ease, transform 0.2s ease;
+      border-left: 3px solid #38bdf8;
+      word-break: break-word;
+    }}
+    .toast.show {{ opacity: 1; transform: translateY(0); }}
+    .toast.ok {{ border-left-color: #16a34a; }}
+    .toast.err {{ border-left-color: #dc2626; }}
+
+    @media (max-width: 640px) {{
+      main {{ padding: 16px 16px 48px 16px; }}
+      header {{ padding: 12px 16px; }}
+      .search-row {{ flex-wrap: wrap; }}
+      .btn-search-main {{ width: 100%; }}
+    }}
   </style>
 </head>
 <body>
@@ -1844,9 +2020,35 @@ def dashboard_html():
   </header>
 
   <main>
+    <!-- Live Refresh Bar -->
+    <div class="live-bar">
+      <div class="live-status" title="Dashboard data refreshes in place without reloading the page">
+        <span id="liveDot" class="live-dot"></span>
+        <span id="liveText">Auto-refresh off</span>
+        <span>&middot; Updated <b id="lastUpdated">--:--:--</b></span>
+      </div>
+      <div class="live-controls">
+        <span class="ctl-label">Press <span class="kbd">/</span> to search</span>
+        <button type="button" id="autoRefreshBtn" class="ctl-btn" onclick="toggleAutoRefresh()" title="Toggle automatic live refresh">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polygon points="5 3 19 12 5 21 5 3"></polygon></svg>
+          <span id="autoRefreshLabel">Auto-Refresh</span>
+        </button>
+        <select id="refreshInterval" class="ctl-select" onchange="setRefreshInterval(this.value)" title="Refresh interval">
+          <option value="10">Every 10s</option>
+          <option value="30">Every 30s</option>
+          <option value="60">Every 1 min</option>
+          <option value="300">Every 5 min</option>
+        </select>
+        <button type="button" id="refreshNowBtn" class="ctl-btn" onclick="refreshDashboard(true)" title="Refresh dashboard data now">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="23 4 23 10 17 10"></polyline><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"></path></svg>
+          Refresh
+        </button>
+      </div>
+    </div>
+
     <!-- Executive Audit Counters Grid -->
     <div class="metrics-grid">
-      <div class="metric-card" onclick="quickFilter('all')" title="Total tasks recorded in queue">
+      <div class="metric-card" data-cat="all" onclick="quickFilter('all')" title="Total tasks recorded in queue">
         <div class="metric-label">Total Tasks</div>
         <div class="metric-value-row">
           <div class="metric-number">{total_tickets}</div>
@@ -1854,7 +2056,7 @@ def dashboard_html():
         </div>
       </div>
 
-      <div class="metric-card" onclick="quickFilter('assigned')" title="Newly assigned tasks">
+      <div class="metric-card" data-cat="assigned" onclick="quickFilter('assigned')" title="Newly assigned tasks">
         <div class="metric-label">Assigned Tasks</div>
         <div class="metric-value-row">
           <div class="metric-number">{assigned_count}</div>
@@ -1862,7 +2064,7 @@ def dashboard_html():
         </div>
       </div>
 
-      <div class="metric-card" onclick="quickFilter('reassigned')" title="Tasks reassigned to a new technician">
+      <div class="metric-card" data-cat="reassigned" onclick="quickFilter('reassigned')" title="Tasks reassigned to a new technician">
         <div class="metric-label">Reassigned Tasks</div>
         <div class="metric-value-row">
           <div class="metric-number">{reassigned_count}</div>
@@ -1870,7 +2072,7 @@ def dashboard_html():
         </div>
       </div>
 
-      <div class="metric-card" onclick="quickFilter('pending')" title="Active dialing or awaiting response">
+      <div class="metric-card" data-cat="pending" onclick="quickFilter('pending')" title="Active dialing or awaiting response">
         <div class="metric-label">Pending / In-Call</div>
         <div class="metric-value-row">
           <div class="metric-number">{pending_count}</div>
@@ -1878,7 +2080,7 @@ def dashboard_html():
         </div>
       </div>
 
-      <div class="metric-card" onclick="quickFilter('escalated')" title="Escalated tasks to Team Leader or Manager">
+      <div class="metric-card" data-cat="escalated" onclick="quickFilter('escalated')" title="Escalated tasks to Team Leader or Manager">
         <div class="metric-label">Escalated Tasks</div>
         <div class="metric-value-row">
           <div class="metric-number">{escalated_count}</div>
@@ -1886,7 +2088,7 @@ def dashboard_html():
         </div>
       </div>
 
-      <div class="metric-card" onclick="quickFilter('ack')" title="Calls accepted and acknowledged">
+      <div class="metric-card" data-cat="ack" onclick="quickFilter('ack')" title="Calls accepted and acknowledged">
         <div class="metric-label">Acknowledged</div>
         <div class="metric-value-row">
           <div class="metric-number">{ack_count}</div>
@@ -1894,7 +2096,7 @@ def dashboard_html():
         </div>
       </div>
 
-      <div class="metric-card" onclick="quickFilter('unresolved')" title="Escalated tasks currently pending resolution">
+      <div class="metric-card" data-cat="unresolved" onclick="quickFilter('unresolved')" title="Escalated tasks currently pending resolution">
         <div class="metric-label">Unresolved Escalations</div>
         <div class="metric-value-row">
           <div class="metric-number">{unresolved_count}</div>
@@ -1902,7 +2104,7 @@ def dashboard_html():
         </div>
       </div>
 
-      <div class="metric-card" title="WhatsApp Template Alerts Sent / Delivered">
+      <div class="metric-card" onclick="filterBySms('delivered')" title="WhatsApp Template Alerts Sent / Delivered (click to show delivered SMS tasks)">
         <div class="metric-label">SMS Dispatched</div>
         <div class="metric-value-row">
           <div class="metric-number">{wa_total}</div>
@@ -1929,6 +2131,7 @@ def dashboard_html():
         <div class="chart-container">
           <canvas id="statusChart"></canvas>
         </div>
+        <div class="chart-hint">Click a segment to filter tasks by status</div>
       </div>
 
       <div class="chart-card">
@@ -1939,6 +2142,7 @@ def dashboard_html():
         <div class="chart-container">
           <canvas id="severityChart"></canvas>
         </div>
+        <div class="chart-hint">Click a bar to filter tasks by severity</div>
       </div>
 
       <div class="chart-card">
@@ -1987,6 +2191,16 @@ def dashboard_html():
         <div class="filter-field">
           <label>To Date</label>
           <input type="date" id="filterToDate" onchange="runFilter()">
+        </div>
+        <div class="filter-field">
+          <label>Severity</label>
+          <select id="filterSeverity" onchange="runFilter()">
+            <option value="all">All Severities</option>
+            <option value="emergency">Emergency</option>
+            <option value="critical">Critical</option>
+            <option value="major">Major</option>
+            <option value="minor">Minor</option>
+          </select>
         </div>
         <div class="filter-field">
           <label>Workflow</label>
@@ -2063,6 +2277,33 @@ def dashboard_html():
       </div>
     </div>
 
+    <!-- Results Toolbar -->
+    <div class="results-toolbar">
+      <div class="results-count" id="resultsCount">&nbsp;</div>
+      <div class="results-controls">
+        <span class="ctl-label">Sort</span>
+        <select id="sortBy" class="ctl-select" onchange="setSort(this.value)">
+          <option value="default">Default order</option>
+          <option value="newest">Newest first</option>
+          <option value="oldest">Oldest first</option>
+          <option value="severity">Severity (high &rarr; low)</option>
+          <option value="tid">Task ID (A &rarr; Z)</option>
+        </select>
+        <span class="ctl-label">Per page</span>
+        <select id="pageSize" class="ctl-select" onchange="setPageSize(this.value)">
+          <option value="10">10</option>
+          <option value="25">25</option>
+          <option value="50">50</option>
+          <option value="100">100</option>
+        </select>
+        <button type="button" id="compactBtn" class="ctl-btn" onclick="toggleCompact()" title="Collapse cards to headers only; click a card header to expand it">Compact View</button>
+        <button type="button" class="ctl-btn" onclick="exportFilteredCsv()" title="Download all tasks matching current filters as CSV">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
+          Export CSV
+        </button>
+      </div>
+    </div>
+
     <!-- Tasks Feed -->
     <div id="ticketsList">
       {cards or '<div class="empty-state" style="display:block;">No active tasks in queue. Use Alert Intake API (/api/alerts) or the manual dispatcher.</div>'}
@@ -2106,6 +2347,9 @@ def dashboard_html():
       </div>
     </div>
   </div>
+
+  <div id="toastStack" class="toast-stack"></div>
+  <script type="application/json" id="dashStats">{dash_stats_json}</script>
 
   <script>
     var activeCategory = 'all';
