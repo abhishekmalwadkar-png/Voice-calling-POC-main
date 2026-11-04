@@ -570,7 +570,7 @@ def send_sms_alert(t, role, rec, call_cid=None, alert_type_override=None, custom
 
     if reason == "rejected":
         sms_body = (
-            f"*Technician Assignment Escalation – Rejection*\n\n"
+            f"Technician Assignment Escalation – Rejection\n\n"
             f"Ticket {tid} at {site_name} is assigned to {tech_name}.\n\n"
             f"The technician rejected the assignment.\n\n"
             f"Rejection reason: {reject_reason_text}.\n\n"
@@ -581,7 +581,7 @@ def send_sms_alert(t, role, rec, call_cid=None, alert_type_override=None, custom
         )
     elif is_emergency:
         sms_body = (
-            f"*Emergency Alert Escalation*\n\n"
+            f"Emergency Alert Escalation\n\n"
             f"Ticket {tid} at {site_name} is assigned to {tech_name}.\n\n"
             f"Severity: Emergency.\n\n"
             f"Issue: {desc}.\n\n"
@@ -591,7 +591,7 @@ def send_sms_alert(t, role, rec, call_cid=None, alert_type_override=None, custom
         )
     else:
         sms_body = (
-            f"*Technician Assignment Escalation – No Answer*\n\n"
+            f"Technician Assignment Escalation – No Answer\n\n"
             f"Ticket {tid} at {site_name} is assigned to {tech_name}.\n\n"
             f"The technician did not answer after {attempt_no} call attempts.\n\n"
             f"Issue: {desc}.\n\n"
@@ -674,7 +674,7 @@ def send_sms_closure(t, role, rec, resolution=None, closed_at=None, delay_sec=No
         close_date = close_time[:10]
     site_disp = t.get('site_name') or t.get('site_number') or 'N/A'
     sms_body = (
-        f"*Ticket Closure Notice*\n\n"
+        f"Ticket Closure Notice\n\n"
         f"Ticket {tid} at {site_disp}.\n\n"
         f"Status: Closed.\n\n"
         f"Resolution: {res}.\n\n"
