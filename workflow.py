@@ -233,8 +233,10 @@ def _dispatch(t, previous, ev):
         return [f"alarm status {t['alarm_status']} recorded"]
 
     if kind in ("ASSIGNMENT_CREATED", "ASSIGNMENT_INITIAL"):
-        if t["uc1_assignment_id"] == t["assignment_id"] and t["uc1_state"] and \
-                not t["uc1_state"].startswith("CANCELLED"):
+        has_calls = q("SELECT 1 FROM calls WHERE ticket_id=? AND assignment_id=? LIMIT 1",
+                      (tid, t["assignment_id"]), one=True)
+        if t["uc1_assignment_id"] == t["assignment_id"] and has_calls and \
+                t["uc1_state"] in (ACTIVE | FINAL) and not str(t["uc1_state"]).startswith("CANCELLED"):
             audit(tid, "assignment_duplicate", f"Assignment {t['assignment_id']} already handled - suppressed")
             return ["assignment already being handled - suppressed"]
         actions = []
