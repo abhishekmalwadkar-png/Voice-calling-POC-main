@@ -2295,6 +2295,14 @@ def handle_update_records(payload):
                 continue
 
             recipients = dict(t.get("recipients") or {})
+            old_tech = dict(recipients.get("technician") or {})
+            if old_tech and old_tech.get("name"):
+                recipients["previous_technician"] = {
+                    "name": old_tech.get("name"),
+                    "mobile": old_tech.get("mobile"),
+                    "language": old_tech.get("language"),
+                    "assignment_id": t.get("assignment_id")
+                }
             recipients["technician"] = {
                 "name": tech_name,
                 "mobile": _format_e164(tech_mob),

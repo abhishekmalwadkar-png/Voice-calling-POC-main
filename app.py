@@ -510,6 +510,7 @@ def dashboard_html():
     total_tickets = len(tickets)
     ack_count = 0
     assigned_count = 0
+    reassigned_count = 0
     pending_count = 0
     escalated_count = 0
     critical_count = 0
@@ -543,12 +544,63 @@ def dashboard_html():
         cw = v.get("call_workflow") or {}
         is_ack = v.get("acknowledged") or cw.get("acknowledged")
         state = (cw.get("state") or "").upper()
+        task_status_raw = str(v.get("status") or "").strip()
+
+        # Resolve technician assignment & reassignment details
+        recips = v.get("recipients") or {}
+        curr_tech = recips.get("technician") or {}
+        curr_name = curr_tech.get("name") or "-"
+        curr_mob = curr_tech.get("mobile") or "-"
+        curr_lang = curr_tech.get("language") or "English"
+        curr_aid = v.get("assignment_id") or "-"
+
+        is_reassigned = (
+            task_status_raw.lower() in ("reassigned", "assignment_reassigned")
+            or state == "CANCELLED_REASSIGNED"
+            or bool(recips.get("previous_technician"))
+        )
+
+        prev_tech = recips.get("previous_technician")
+        prev_name, prev_mob, prev_lang, prev_aid = "-", "-", "-", "-"
+        if is_reassigned and not prev_tech:
+            tid_lookup = v.get("ticket_id")
+            ev = store.q(
+                "SELECT payload FROM events WHERE ticket_id=? AND event_type IN ('ALERT_INGESTED', 'ASSIGNMENT_CREATED', 'ASSIGNMENT_INITIAL') ORDER BY rowid ASC LIMIT 1",
+                (tid_lookup,),
+                one=True
+            )
+            if ev and ev.get("payload"):
+                try:
+                    p = json.loads(ev["payload"])
+                    p_name = p.get("technician_name")
+                    if p_name and p_name != curr_name:
+                        prev_tech = {
+                            "name": p_name,
+                            "mobile": p.get("technician_mobile") or p.get("phone_number") or "-",
+                            "language": p.get("technician_preferred_lang") or p.get("technician_language") or "English",
+                            "assignment_id": f"{tid_lookup}-ASN1"
+                        }
+                except Exception:
+                    pass
+
+        if prev_tech:
+            is_reassigned = True
+            prev_name = prev_tech.get("name") or "-"
+            prev_mob = prev_tech.get("mobile") or "-"
+            prev_lang = prev_tech.get("language") or "English"
+            prev_aid = prev_tech.get("assignment_id") or f"{v.get('ticket_id')}-ASN1"
 
         if is_ack:
             ack_count += 1
             filter_cat = "ack"
             cls = "status-ack"
             status_text = "ACKNOWLEDGED"
+            is_unresolved = False
+        elif is_reassigned:
+            reassigned_count += 1
+            filter_cat = "reassigned"
+            cls = "status-reassigned"
+            status_text = "REASSIGNED"
             is_unresolved = False
         elif "ESCALAT" in state or "MANAGER" in state or "LEADER" in state:
             escalated_count += 1
@@ -671,6 +723,54 @@ def dashboard_html():
         recip_names = " ".join(r.get("name", "") for r in recips.values() if isinstance(r, dict))
         recip_phones = " ".join(r.get("mobile", "") for r in recips.values() if isinstance(r, dict))
 
+        if is_reassigned:
+            tech_html = f"""
+            <div class="reassign-container">
+              <div class="reassign-title-row">
+                <div class="reassign-title">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M16 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path><circle cx="8.5" cy="7" r="4"></circle><polyline points="17 11 19 13 23 9"></polyline></svg>
+                  Task Reassignment Details
+                </div>
+                <span class="status-pill status-reassigned"><span class="status-dot"></span> Reassigned</span>
+              </div>
+              <div class="reassign-cards-grid">
+                <div class="tech-card-sub previous">
+                  <div class="tech-sub-header">Previously Assigned To</div>
+                  <div class="tech-sub-name">{safe_esc(prev_name)}</div>
+                  <div class="tech-sub-meta">
+                    <span class="meta-tag">Mobile: <b class="mono-val">{safe_esc(prev_mob)}</b></span>
+                    <span class="meta-tag">Language: <b>{safe_esc(prev_lang)}</b></span>
+                    <span class="meta-tag">Prev Assignment ID: <b class="mono-val">{safe_esc(prev_aid)}</b></span>
+                  </div>
+                </div>
+                <div class="reassign-arrow-divider" title="Reassigned to new technician">
+                  <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="5" y1="12" x2="19" y2="12"></line><polyline points="12 5 19 12 12 19"></polyline></svg>
+                </div>
+                <div class="tech-card-sub current">
+                  <div class="tech-sub-header">Reassigned To (Current Technician)</div>
+                  <div class="tech-sub-name">{safe_esc(curr_name)}</div>
+                  <div class="tech-sub-meta">
+                    <span class="meta-tag">Mobile: <b class="mono-val">{safe_esc(curr_mob)}</b></span>
+                    <span class="meta-tag">Language: <b>{safe_esc(curr_lang)}</b></span>
+                    <span class="meta-tag">New Assignment ID: <b class="mono-val">{safe_esc(curr_aid)}</b></span>
+                  </div>
+                </div>
+              </div>
+            </div>"""
+        else:
+            tech_html = f"""
+            <div class="tech-details-section">
+              <div class="tech-sub-header" style="color:#475569;">Assigned Technician</div>
+              <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;">
+                <div class="tech-sub-name" style="margin-bottom:0;">{safe_esc(curr_name)}</div>
+                <div class="tech-sub-meta">
+                  <span class="meta-tag">Mobile: <b class="mono-val">{safe_esc(curr_mob)}</b></span>
+                  <span class="meta-tag">Language: <b>{safe_esc(curr_lang)}</b></span>
+                  <span class="meta-tag">Assignment ID: <b class="mono-val">{safe_esc(curr_aid)}</b></span>
+                </div>
+              </div>
+            </div>"""
+
         search_blob = (
             f"{safe_esc(v.get('ticket_id')).lower()} "
             f"{safe_esc(v.get('alarm_id')).lower()} "
@@ -680,6 +780,7 @@ def dashboard_html():
             f"{safe_esc(v.get('site_name')).lower()} "
             f"{safe_esc(v.get('site_number')).lower()} "
             f"{recip_names.lower()} {recip_phones} "
+            f"{safe_esc(prev_name).lower()} {safe_esc(prev_mob)} "
             f"{' '.join(all_call_sids).lower()} "
             f"{' '.join(all_wamids).lower()} "
             f"{safe_esc(filter_cat)}"
@@ -701,6 +802,45 @@ def dashboard_html():
         wf_attr = " ".join(set(all_workflows))
         wa_status_attr = " ".join(set(all_wa_statuses)) or "none"
 
+        task_details_obj = {
+            "task_id": v.get("ticket_id"),
+            "alarm_id": v.get("alarm_id") or v.get("alert_id") or "-",
+            "site_number": v.get("site_number") or "-",
+            "site_name": v.get("site_name") or "Main Site",
+            "severity": severity,
+            "task_status": v.get("status") or "Active",
+            "alarm_status": v.get("alarm_status") or "Active",
+            "operational_status": op_status or "-",
+            "description": v.get("description") or "-",
+            "is_reassigned": is_reassigned,
+            "initial_assignment": {
+                "name": (prev_name if is_reassigned else curr_name),
+                "mobile": (prev_mob if is_reassigned else curr_mob),
+                "language": (prev_lang if is_reassigned else curr_lang),
+                "assignment_id": (prev_aid if is_reassigned else curr_aid)
+            },
+            "reassignment": {
+                "name": curr_name,
+                "mobile": curr_mob,
+                "language": curr_lang,
+                "assignment_id": curr_aid,
+                "reassigned_at": time_str
+            } if is_reassigned else None,
+            "team_leader": {
+                "name": (recips.get("team_leader") or {}).get("name") or "-",
+                "mobile": (recips.get("team_leader") or {}).get("mobile") or "-",
+                "language": (recips.get("team_leader") or {}).get("language") or "-"
+            },
+            "manager": {
+                "name": (recips.get("manager") or {}).get("name") or "-",
+                "mobile": (recips.get("manager") or {}).get("mobile") or "-",
+                "language": (recips.get("manager") or {}).get("language") or "-"
+            },
+            "event_timestamp": time_str,
+            "last_event_id": v.get("last_event_id") or "-"
+        }
+        task_json_str = html.escape(json.dumps(task_details_obj), quote=True)
+
         cards += f"""
         <div class="ticket-card" 
              data-category="{filter_cat}" 
@@ -714,7 +854,7 @@ def dashboard_html():
              data-search="{search_blob}">
           <div class="card-header">
             <div class="ticket-primary">
-              <span class="ticket-id">{safe_esc(v.get('ticket_id') or 'INC000')}</span>
+              <span class="ticket-id"><span style="font-size:10px;font-weight:600;color:#64748b;text-transform:uppercase;margin-right:3px;">Task:</span>{safe_esc(v.get('ticket_id') or 'INC000')}</span>
               <span class="site-badge">Site {safe_esc(v.get('site_number') or '')} - {safe_esc(v.get('site_name') or 'Main Site')}</span>
               <span class="sev-badge {sev_cls}">{severity}</span>
               <span class="sub-badge">Alarm: <b>{safe_esc(v.get('alarm_id') or v.get('alert_id') or '-')}</b></span>
@@ -725,12 +865,16 @@ def dashboard_html():
               <div class="status-pill {cls}">
                 <span class="status-dot"></span> {status_text}
               </div>
+              <button type="button" class="btn-view-details" onclick="openTaskDetails(this)" data-task="{task_json_str}" title="View complete task assignment, reassignment, and technician details">
+                View Details
+              </button>
               <button type="button" class="btn-inspect" onclick="openTimeline('{safe_esc(v.get('ticket_id'))}')" title="Inspect complete chronological communication timeline">
                 Inspect Timeline
               </button>
             </div>
           </div>
           <div class="card-body">
+            {tech_html}
             <div class="card-summary">
               <div><span class="summary-label">Summary:</span> {safe_esc(cw.get('response_summary') or 'No call response yet.')}</div>
               <div class="followup-info">Follow-up: <b>{safe_esc(v.get('followup', {}).get('state') or 'None')}</b></div>
@@ -743,7 +887,7 @@ def dashboard_html():
           <div class="card-footer">
             <span>Event Timestamp: <b>{time_str}</b></span>
             <span>Last Event ID: <b>{safe_esc(v.get('last_event_id') or '-')}</b></span>
-            <span>Ticket Status: <b>{safe_esc(v.get('status') or 'Active')}</b></span>
+            <span>Task Status: <b>{safe_esc(v.get('status') or 'Active')}</b></span>
           </div>
         </div>"""
 
@@ -1234,7 +1378,117 @@ def dashboard_html():
     .status-escalated .status-dot {{ background: #dc2626; }}
     .status-assigned {{ background: #f8fafc; color: #475569; }}
     .status-assigned .status-dot {{ background: #94a3b8; }}
+    .status-reassigned {{ background: #faf5ff; color: #7e22ce; border: 1px solid #e9d5ff; }}
+    .status-reassigned .status-dot {{ background: #a855f7; }}
+    .mono-val {{ font-family: 'JetBrains Mono', monospace; font-size: 11px; }}
 
+    .tech-details-section {{
+      background: #f8fafc;
+      border: 1px solid #e2e8f0;
+      border-radius: 8px;
+      padding: 10px 14px;
+      margin-bottom: 12px;
+    }}
+    .reassign-container {{
+      background: #faf5ff;
+      border: 1px solid #e9d5ff;
+      border-radius: 8px;
+      padding: 12px 14px;
+      margin-bottom: 12px;
+    }}
+    .reassign-title-row {{
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 10px;
+    }}
+    .reassign-title {{
+      font-size: 11.5px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      color: #7e22ce;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }}
+    .reassign-cards-grid {{
+      display: grid;
+      grid-template-columns: 1fr auto 1fr;
+      align-items: center;
+      gap: 12px;
+    }}
+    @media (max-width: 768px) {{
+      .reassign-cards-grid {{
+        grid-template-columns: 1fr;
+      }}
+    }}
+    .tech-card-sub {{
+      background: #ffffff;
+      border: 1px solid #e2e8f0;
+      border-radius: 6px;
+      padding: 10px 12px;
+    }}
+    .tech-card-sub.current {{
+      border-color: #c084fc;
+      background: #ffffff;
+      box-shadow: 0 1px 3px rgba(168,85,247,0.08);
+    }}
+    .tech-card-sub.previous {{
+      border-color: #cbd5e1;
+      background: #f8fafc;
+    }}
+    .tech-sub-header {{
+      font-size: 10.5px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.4px;
+      margin-bottom: 4px;
+    }}
+    .tech-card-sub.current .tech-sub-header {{
+      color: #9333ea;
+    }}
+    .tech-card-sub.previous .tech-sub-header {{
+      color: #64748b;
+    }}
+    .tech-sub-name {{
+      font-size: 13.5px;
+      font-weight: 600;
+      color: #0f172a;
+      margin-bottom: 6px;
+    }}
+    .tech-sub-meta {{
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px 12px;
+      font-size: 11.5px;
+    }}
+    .reassign-arrow-divider {{
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: #a855f7;
+      padding: 4px;
+    }}
+
+    .btn-view-details {{
+      background: #2563eb;
+      color: #ffffff;
+      border: 1px solid #1d4ed8;
+      padding: 4px 11px;
+      border-radius: 6px;
+      font-size: 11.5px;
+      font-weight: 600;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      transition: all 0.15s ease;
+    }}
+    .btn-view-details:hover {{
+      background: #1d4ed8;
+      box-shadow: 0 1px 4px rgba(37,99,235,0.3);
+    }}
     .btn-inspect {{
       background: #ffffff;
       color: #0969da;
@@ -1579,19 +1833,27 @@ def dashboard_html():
   <main>
     <!-- Executive Audit Counters Grid -->
     <div class="metrics-grid">
-      <div class="metric-card" onclick="quickFilter('all')" title="Total tickets recorded in queue">
-        <div class="metric-label">Total Tickets</div>
+      <div class="metric-card" onclick="quickFilter('all')" title="Total tasks recorded in queue">
+        <div class="metric-label">Total Tasks</div>
         <div class="metric-value-row">
           <div class="metric-number">{total_tickets}</div>
           <span class="metric-badge badge-blue">All</span>
         </div>
       </div>
 
-      <div class="metric-card" onclick="quickFilter('assigned')" title="Newly assigned tickets">
-        <div class="metric-label">Assigned Tickets</div>
+      <div class="metric-card" onclick="quickFilter('assigned')" title="Newly assigned tasks">
+        <div class="metric-label">Assigned Tasks</div>
         <div class="metric-value-row">
           <div class="metric-number">{assigned_count}</div>
           <span class="metric-badge badge-cyan">New</span>
+        </div>
+      </div>
+
+      <div class="metric-card" onclick="quickFilter('reassigned')" title="Tasks reassigned to a new technician">
+        <div class="metric-label">Reassigned Tasks</div>
+        <div class="metric-value-row">
+          <div class="metric-number">{reassigned_count}</div>
+          <span class="metric-badge badge-purple">Reassigned</span>
         </div>
       </div>
 
@@ -1603,8 +1865,8 @@ def dashboard_html():
         </div>
       </div>
 
-      <div class="metric-card" onclick="quickFilter('escalated')" title="Escalated to Team Leader or Manager">
-        <div class="metric-label">Escalated Tickets</div>
+      <div class="metric-card" onclick="quickFilter('escalated')" title="Escalated tasks to Team Leader or Manager">
+        <div class="metric-label">Escalated Tasks</div>
         <div class="metric-value-row">
           <div class="metric-number">{escalated_count}</div>
           <span class="metric-badge badge-red">Tier 1 & 2</span>
@@ -1619,7 +1881,7 @@ def dashboard_html():
         </div>
       </div>
 
-      <div class="metric-card" onclick="quickFilter('unresolved')" title="Escalated tickets currently pending resolution">
+      <div class="metric-card" onclick="quickFilter('unresolved')" title="Escalated tasks currently pending resolution">
         <div class="metric-label">Unresolved Escalations</div>
         <div class="metric-value-row">
           <div class="metric-number">{unresolved_count}</div>
@@ -1648,8 +1910,8 @@ def dashboard_html():
     <div class="analytics-grid">
       <div class="chart-card">
         <div class="chart-header">
-          <div class="chart-title">Ticket Status Distribution</div>
-          <div class="chart-subtitle">Real-time status breakdown across all active helpdesk tickets</div>
+          <div class="chart-title">Task Status Distribution</div>
+          <div class="chart-subtitle">Real-time status breakdown across all active helpdesk tasks</div>
         </div>
         <div class="chart-container">
           <canvas id="statusChart"></canvas>
@@ -1697,7 +1959,7 @@ def dashboard_html():
             <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
           </span>
           <input type="text" id="searchInput" class="search-input-main" 
-                 placeholder="Search by Ticket ID, Alarm ID, Assignment ID, Technician Name, Mobile, Call SID, or WAMID..." 
+                 placeholder="Search by Task ID, Alarm ID, Assignment ID, Technician Name, Mobile, Call SID, or WAMID..." 
                  oninput="runFilter()" onkeydown="if(event.key==='Enter') runFilter()">
         </div>
         <button type="button" class="btn-search-main" onclick="runFilter()">Search</button>
@@ -1767,8 +2029,9 @@ def dashboard_html():
       <!-- Quick Filter Pills -->
       <div class="filter-pills-row">
         <span class="pill-label">Quick Views:</span>
-        <button type="button" id="tab-btn-all" class="filter-btn active" onclick="switchTab('all')">All Tickets ({total_tickets})</button>
+        <button type="button" id="tab-btn-all" class="filter-btn active" onclick="switchTab('all')">All Tasks ({total_tickets})</button>
         <button type="button" id="tab-btn-assigned" class="filter-btn" onclick="switchTab('assigned')">Assigned ({assigned_count})</button>
+        <button type="button" id="tab-btn-reassigned" class="filter-btn" onclick="switchTab('reassigned')">Reassigned ({reassigned_count})</button>
         <button type="button" id="tab-btn-pending" class="filter-btn" onclick="switchTab('pending')">Pending / In-Call ({pending_count})</button>
         <button type="button" id="tab-btn-escalated" class="filter-btn" onclick="switchTab('escalated')">Escalated ({escalated_count})</button>
         <button type="button" id="tab-btn-ack" class="filter-btn" onclick="switchTab('ack')">Acknowledged ({ack_count})</button>
@@ -1781,20 +2044,20 @@ def dashboard_html():
 
     <!-- Empty State -->
     <div id="emptyCategoryMsg" class="empty-state">
-      No tickets found matching the selected search criteria or filter combinations.
+      No tasks found matching the selected search criteria or filter combinations.
       <div style="margin-top:10px;">
         <button type="button" class="btn-reset" onclick="resetAllFilters()">Reset All Filters</button>
       </div>
     </div>
 
-    <!-- Tickets Feed -->
+    <!-- Tasks Feed -->
     <div id="ticketsList">
-      {cards or '<div class="empty-state" style="display:block;">No active tickets in queue. Use Alert Intake API (/api/alerts) or the manual dispatcher.</div>'}
+      {cards or '<div class="empty-state" style="display:block;">No active tasks in queue. Use Alert Intake API (/api/alerts) or the manual dispatcher.</div>'}
     </div>
 
     <!-- Pagination Bar -->
     <div id="paginationBar" class="pagination-bar">
-      <div id="paginationInfo" class="pagination-info">Showing 1 to 10 of tickets</div>
+      <div id="paginationInfo" class="pagination-info">Showing 1 to 10 of tasks</div>
       <div id="paginationControls" class="pagination-controls"></div>
     </div>
   </main>
@@ -1811,6 +2074,22 @@ def dashboard_html():
       </div>
       <div class="modal-body" id="timelineStreamContainer">
         <!-- Chronological stream populated by JS -->
+      </div>
+    </div>
+  </div>
+
+  <!-- Comprehensive Task Details Modal -->
+  <div id="taskDetailsModal" class="modal-backdrop" onclick="closeTaskDetailsBackdrop(event)">
+    <div class="modal-card" style="max-width: 680px;">
+      <div class="modal-header">
+        <div>
+          <div style="font-size:11px;color:#94a3b8;text-transform:uppercase;letter-spacing:0.04em;">Task Intelligence & Assignment Record</div>
+          <div class="modal-title" id="taskDetailsModalTitle">Task Details</div>
+        </div>
+        <button type="button" class="btn-modal-close" onclick="closeTaskDetails()">&times;</button>
+      </div>
+      <div class="modal-body" id="taskDetailsBody" style="padding: 20px;">
+        <!-- Populated dynamically by JS -->
       </div>
     </div>
   </div>
@@ -1901,7 +2180,7 @@ def dashboard_html():
 
       var fromNum = (currentPage - 1) * PAGE_SIZE + 1;
       var toNum = Math.min(currentPage * PAGE_SIZE, totalMatched);
-      info.innerHTML = 'Showing <b>' + fromNum + '</b> to <b>' + toNum + '</b> of <b>' + totalMatched + '</b> tickets';
+      info.innerHTML = 'Showing <b>' + fromNum + '</b> to <b>' + toNum + '</b> of <b>' + totalMatched + '</b> tasks';
 
       var html = '';
       html += '<button type="button" class="page-btn" ' + (currentPage === 1 ? 'disabled' : '') + ' onclick="goToPage(' + (currentPage - 1) + ')">Previous</button>';
@@ -2057,7 +2336,7 @@ def dashboard_html():
             if (fAck !== 'all') filterTags.push('Ack: ' + (fAck === 'true' ? 'Yes' : 'No'));
             if (fWa !== 'all') filterTags.push('SMS: ' + fWa);
 
-            banner.innerHTML = '<div><b>Active Filter:</b> ' + filterTags.join(' &bull; ') + ' &mdash; Showing <b>' + totalMatched + '</b> matching ticket(s)</div>' +
+            banner.innerHTML = '<div><b>Active Filter:</b> ' + filterTags.join(' &bull; ') + ' &mdash; Showing <b>' + totalMatched + '</b> matching task(s)</div>' +
                                '<button type="button" onclick="resetAllFilters()" style="background:#2563eb;color:#fff;border:none;padding:4px 10px;border-radius:4px;font-size:11.5px;font-weight:600;cursor:pointer;">Reset</button>';
             banner.style.display = 'flex';
           }} else {{
@@ -2077,7 +2356,7 @@ def dashboard_html():
       var title = document.getElementById('timelineModalTitle');
       var container = document.getElementById('timelineStreamContainer');
 
-      title.innerText = 'Ticket: ' + tid + ' - Audit Evidence Stream';
+      title.innerText = 'Task: ' + tid + ' - Audit Evidence Stream';
       container.innerHTML = '<div style="text-align:center;color:#64748b;padding:30px;">Querying chronological audit logs from database...</div>';
       modal.style.display = 'flex';
 
@@ -2140,8 +2419,116 @@ def dashboard_html():
       }}
     }}
 
+    // Task Details Modal Handlers
+    function openTaskDetails(btn) {{
+      try {{
+        var raw = btn.getAttribute('data-task');
+        if (!raw) return;
+        var data = JSON.parse(raw);
+        var modal = document.getElementById('taskDetailsModal');
+        var title = document.getElementById('taskDetailsModalTitle');
+        var body = document.getElementById('taskDetailsBody');
+
+        title.innerText = 'Task ' + data.task_id + ' - Assignment Details';
+
+        var reassignHtml = '';
+        if (data.is_reassigned && data.reassignment) {{
+          reassignHtml = 
+            '<div style="background:#faf5ff;border:1px solid #e9d5ff;border-radius:8px;padding:14px;margin-bottom:16px;">' +
+              '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;">' +
+                '<div style="font-size:12px;font-weight:700;color:#7e22ce;text-transform:uppercase;letter-spacing:0.5px;">Assignment & Reassignment History</div>' +
+                '<span class="status-pill status-reassigned"><span class="status-dot"></span> Reassigned</span>' +
+              '</div>' +
+              '<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">' +
+                '<div style="background:#fff;border:1px solid #cbd5e1;border-radius:6px;padding:12px;">' +
+                  '<div style="font-size:11px;font-weight:700;color:#64748b;text-transform:uppercase;margin-bottom:6px;">Previously Assigned To</div>' +
+                  '<div style="font-size:14px;font-weight:600;color:#0f172a;margin-bottom:6px;">' + data.initial_assignment.name + '</div>' +
+                  '<div style="font-size:12px;color:#475569;display:flex;flex-direction:column;gap:4px;">' +
+                    '<div>Mobile: <b style="font-family:monospace;">' + data.initial_assignment.mobile + '</b></div>' +
+                    '<div>Language: <b>' + data.initial_assignment.language + '</b></div>' +
+                    '<div>Previous Assignment ID: <b style="font-family:monospace;">' + data.initial_assignment.assignment_id + '</b></div>' +
+                  '</div>' +
+                '</div>' +
+                '<div style="background:#fff;border:1px solid #c084fc;border-radius:6px;padding:12px;box-shadow:0 1px 4px rgba(168,85,247,0.1);">' +
+                  '<div style="font-size:11px;font-weight:700;color:#9333ea;text-transform:uppercase;margin-bottom:6px;">Reassigned To (Current)</div>' +
+                  '<div style="font-size:14px;font-weight:600;color:#0f172a;margin-bottom:6px;">' + data.reassignment.name + '</div>' +
+                  '<div style="font-size:12px;color:#475569;display:flex;flex-direction:column;gap:4px;">' +
+                    '<div>Mobile: <b style="font-family:monospace;">' + data.reassignment.mobile + '</b></div>' +
+                    '<div>Language: <b>' + data.reassignment.language + '</b></div>' +
+                    '<div>New Assignment ID: <b style="font-family:monospace;">' + data.reassignment.assignment_id + '</b></div>' +
+                  '</div>' +
+                '</div>' +
+              '</div>' +
+            '</div>';
+        }} else {{
+          reassignHtml = 
+            '<div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:14px;margin-bottom:16px;">' +
+              '<div style="font-size:12px;font-weight:700;color:#334155;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:10px;">Assigned Technician</div>' +
+              '<div style="background:#fff;border:1px solid #e2e8f0;border-radius:6px;padding:12px;">' +
+                '<div style="font-size:14px;font-weight:600;color:#0f172a;margin-bottom:6px;">' + data.initial_assignment.name + '</div>' +
+                '<div style="font-size:12px;color:#475569;display:grid;grid-template-columns:1fr 1fr;gap:8px;">' +
+                  '<div>Mobile: <b style="font-family:monospace;">' + data.initial_assignment.mobile + '</b></div>' +
+                  '<div>Language: <b>' + data.initial_assignment.language + '</b></div>' +
+                  '<div>Assignment ID: <b style="font-family:monospace;">' + data.initial_assignment.assignment_id + '</b></div>' +
+                  '<div>Reassignment Status: <b style="color:#059669;">Initial Assignment (Not Reassigned)</b></div>' +
+                '</div>' +
+              '</div>' +
+            '</div>';
+        }}
+
+        var supervisorsHtml = 
+          '<div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:14px;margin-bottom:16px;">' +
+            '<div style="font-size:12px;font-weight:700;color:#334155;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:10px;">Supervisory Escalation Contacts</div>' +
+            '<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">' +
+              '<div style="background:#fff;border:1px solid #e2e8f0;border-radius:6px;padding:10px;">' +
+                '<div style="font-size:11px;font-weight:700;color:#64748b;text-transform:uppercase;margin-bottom:4px;">Team Leader</div>' +
+                '<div style="font-size:13px;font-weight:600;color:#0f172a;margin-bottom:4px;">' + data.team_leader.name + '</div>' +
+                '<div style="font-size:11.5px;color:#64748b;">Mobile: <b style="font-family:monospace;">' + data.team_leader.mobile + '</b> &bull; Lang: <b>' + data.team_leader.language + '</b></div>' +
+              '</div>' +
+              '<div style="background:#fff;border:1px solid #e2e8f0;border-radius:6px;padding:10px;">' +
+                '<div style="font-size:11px;font-weight:700;color:#64748b;text-transform:uppercase;margin-bottom:4px;">Operations Manager</div>' +
+                '<div style="font-size:13px;font-weight:600;color:#0f172a;margin-bottom:4px;">' + data.manager.name + '</div>' +
+                '<div style="font-size:11.5px;color:#64748b;">Mobile: <b style="font-family:monospace;">' + data.manager.mobile + '</b> &bull; Lang: <b>' + data.manager.language + '</b></div>' +
+              '</div>' +
+            '</div>' +
+          '</div>';
+
+        var metaHtml = 
+          '<div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:14px;">' +
+            '<div style="font-size:12px;font-weight:700;color:#334155;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:10px;">Task & Site Information</div>' +
+            '<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;font-size:12px;color:#475569;">' +
+              '<div>Site: <b>' + data.site_number + ' - ' + data.site_name + '</b></div>' +
+              '<div>Alarm: <b>' + data.alarm_id + '</b></div>' +
+              '<div>Severity: <b>' + data.severity + '</b></div>' +
+              '<div>Task Status: <b>' + data.task_status + '</b></div>' +
+              '<div>Alarm Status: <b>' + data.alarm_status + '</b></div>' +
+              '<div>Movement: <b>' + data.operational_status + '</b></div>' +
+              '<div style="grid-column:1/-1;">Event Timestamp: <b>' + data.event_timestamp + '</b></div>' +
+              '<div style="grid-column:1/-1;">Description: <b>' + data.description + '</b></div>' +
+            '</div>' +
+          '</div>';
+
+        body.innerHTML = reassignHtml + supervisorsHtml + metaHtml;
+        modal.style.display = 'flex';
+      }} catch(err) {{
+        console.error('openTaskDetails error:', err);
+      }}
+    }}
+
+    function closeTaskDetails() {{
+      var modal = document.getElementById('taskDetailsModal');
+      if (modal) modal.style.display = 'none';
+    }}
+
+    function closeTaskDetailsBackdrop(e) {{
+      if (e.target && e.target.id === 'taskDetailsModal') closeTaskDetails();
+    }}
+
     document.addEventListener('keydown', function(e) {{
-      if (e.key === 'Escape') closeTimeline();
+      if (e.key === 'Escape') {{
+        closeTimeline();
+        closeTaskDetails();
+      }}
     }});
 
     // Initialize Charts Safely (Never blocking)
@@ -2151,16 +2538,16 @@ def dashboard_html():
         return;
       }}
       try {{
-        const statusData = [{assigned_count}, {pending_count}, {escalated_count}, {ack_count}];
+        const statusData = [{assigned_count}, {reassigned_count}, {pending_count}, {escalated_count}, {ack_count}];
         const elStatus = document.getElementById('statusChart');
         if (elStatus) {{
           new Chart(elStatus.getContext('2d'), {{
             type: 'doughnut',
             data: {{
-              labels: ['Assigned', 'Pending / In-Call', 'Escalated', 'Acknowledged'],
+              labels: ['Assigned', 'Reassigned', 'Pending / In-Call', 'Escalated', 'Acknowledged'],
               datasets: [{{
                 data: statusData,
-                backgroundColor: ['#06b6d4', '#f59e0b', '#ef4444', '#10b981'],
+                backgroundColor: ['#06b6d4', '#a855f7', '#f59e0b', '#ef4444', '#10b981'],
                 borderWidth: 2,
                 borderColor: '#ffffff',
                 hoverOffset: 6
@@ -2187,7 +2574,7 @@ def dashboard_html():
             data: {{
               labels: ['Critical', 'Major', 'Normal / Low'],
               datasets: [{{
-                label: 'Tickets',
+                label: 'Tasks',
                 data: [{critical_count}, {major_count}, {normal_count}],
                 backgroundColor: ['#dc2626', '#f59e0b', '#2563eb'],
                 borderRadius: 6,
