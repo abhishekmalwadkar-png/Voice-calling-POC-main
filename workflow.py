@@ -875,6 +875,18 @@ def trigger_emergency_close(ticket_id, resolution=None, closed_at=None, recipien
 
 
 # =========================================================================== Twilio webhooks (TwiML)
+def _digits(t):
+    """Ack/reject keys for a ticket; falls back to defaults if missing, 'None' or not a single digit."""
+    def ok(v, d):
+        v = str(v if v is not None else "").strip()
+        return v if re.fullmatch(r"[0-9]", v) else d
+    ack = ok(t.get("ack_digit") if t else None, ok(CFG["default_ack_digit"], "1"))
+    rej = ok(t.get("reject_digit") if t else None, ok(CFG["default_reject_digit"], "9"))
+    if ack == rej:
+        rej = next(d for d in "9876543210" if d != ack)
+    return ack, rej
+
+
 def _twiml(body):
     return f'<?xml version="1.0" encoding="UTF-8"?><Response>{body}</Response>'
 
@@ -908,7 +920,8 @@ def twiml_voice(cid, retry):
             update_call(cid, outcome="informed")
             goodbye = texts.LANGS[lang]["goodbye"]
             return _twiml(texts.say(lang, prompt) + '<Pause length="1"/>' + texts.say(lang, prompt) + texts.say(lang, goodbye) + "<Hangup/>")
-        prompt = texts.voice_text(lang, "technician", t, ack=t["ack_digit"], rej=t["reject_digit"],
+        _a, _r = _digits(t)
+        prompt = texts.voice_text(lang, "technician", t, ack=_a, rej=_r,
                                   greet=texts.greeting(lang, c["recipient_name"]))
         gather = (f'<Gather input="dtmf" numDigits="1" timeout="8" method="POST" '
                   f'action="/twilio/gather?cid={cid}&amp;r={retry}">{texts.say(lang, prompt)}</Gather>')
@@ -920,18 +933,19 @@ def twiml_voice(cid, retry):
         # Answering counts as reached; the reassign question records a yes/no decision on top
         tech = t["recipients"].get("technician", {})
         tech_name = tech.get("name") or "the technician"
+        _a, _r = _digits(t)
         if is_emergency:
             reason_key = "emergency_reason_rejected" if t.get("esc_reason") == "rejected" else "emergency_reason_no_answer"
             reason = texts.LANGS[lang].get(reason_key, "did not answer the call")
             text = (texts.voice_text(lang, "emergency_escalation", t, name=tech_name, reason=reason,
                                      greet=texts.greeting(lang, c["recipient_name"])) + " "
-                    + texts.LANGS[lang]["escalation_question"].format(ack=t["ack_digit"], rej=t["reject_digit"]))
+                    + texts.LANGS[lang]["escalation_question"].format(ack=_a, rej=_r))
         else:
             reason_key = "reason_rejected" if t.get("esc_reason") == "rejected" else "reason_no_ack"
             reason = texts.LANGS[lang][reason_key].format(n=t.get("esc_detail") or "")
             text = (texts.voice_text(lang, "escalation", t, name=tech_name, reason=reason,
                                      greet=texts.greeting(lang, c["recipient_name"])) + " "
-                    + texts.LANGS[lang]["escalation_question"].format(ack=t["ack_digit"], rej=t["reject_digit"]))
+                    + texts.LANGS[lang]["escalation_question"].format(ack=_a, rej=_r))
         if c["outcome"] not in ("reassign_yes", "reassign_no"):
             update_call(cid, outcome="reached")
         gather = (f'<Gather input="dtmf" numDigits="1" timeout="8" method="POST" '
@@ -972,6 +986,8 @@ def twiml_gather(cid, retry, digits):
         return _twiml("<Hangup/>")
     t = get_ticket(c["ticket_id"])
     lang = c["language"] or "en"
+    t = dict(t)
+    t["ack_digit"], t["reject_digit"] = _digits(t)
     with ticket_lock(c["ticket_id"]):
         update_call(cid, dtmf=",".join(x for x in (c["dtmf"], digits) if x))
         audit(c["ticket_id"], "dtmf", f"{c['role']} pressed '{digits}'", call_id=cid)
@@ -1959,7 +1975,7 @@ def get_alerts_view(payload=None):
 
 
 def handle_push_records(payload):
-    """Handles POST /api/pushrecords for pushing ticket/task records into DB (PostgreSQL & SQLite).
+    """Handles POST /api/pushrecords for pushing ticket/task records into DB (PostgreSQL).
     Strictly validates all 17 Required fields specified in table (1).tsv:
     1. task_id (Required)
     2. issue_description (Required)
