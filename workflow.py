@@ -570,34 +570,34 @@ def send_sms_alert(t, role, rec, call_cid=None, alert_type_override=None, custom
 
     if reason == "rejected":
         sms_body = (
-            f"Technician Assignment Escalation – Rejection\n\n"
-            f"Ticket {tid} at {site_name} is assigned to {tech_name}.\n\n"
-            f"The technician rejected the assignment.\n\n"
-            f"Rejection reason: {reject_reason_text}.\n\n"
-            f"Latest contact outcome: {reject_reason_text}.\n\n"
-            f"Total call attempts: {attempt_no}.\n\n"
-            f"Escalation timestamp: {esc_date}.\n\n"
+            f"Technician Assignment Escalation – Rejection\n"
+            f"Ticket {tid} at {site_name} is assigned to {tech_name}.\n"
+            f"The technician rejected the assignment.\n"
+            f"Rejection reason: {reject_reason_text}.\n"
+            f"Latest contact outcome: {reject_reason_text}.\n"
+            f"Total call attempts: {attempt_no}.\n"
+            f"Escalation timestamp: {esc_date}.\n"
             f"Please follow up in NexTask."
         )
     elif is_emergency:
         sms_body = (
-            f"Emergency Alert Escalation\n\n"
-            f"Ticket {tid} at {site_name} is assigned to {tech_name}.\n\n"
-            f"Severity: Emergency.\n\n"
-            f"Issue: {desc}.\n\n"
-            f"Total call attempts: {attempt_no}.\n\n"
-            f"Escalation timestamp: {esc_date}.\n\n"
+            f"Emergency Alert Escalation\n"
+            f"Ticket {tid} at {site_name} is assigned to {tech_name}.\n"
+            f"Severity: Emergency.\n"
+            f"Issue: {desc}.\n"
+            f"Total call attempts: {attempt_no}.\n"
+            f"Escalation timestamp: {esc_date}.\n"
             f"Please follow up in NexTask."
         )
     else:
         sms_body = (
-            f"Technician Assignment Escalation – No Answer\n\n"
-            f"Ticket {tid} at {site_name} is assigned to {tech_name}.\n\n"
-            f"The technician did not answer after {attempt_no} call attempts.\n\n"
-            f"Issue: {desc}.\n\n"
-            f"Latest contact outcome: No answer.\n\n"
-            f"Total call attempts: {attempt_no}.\n\n"
-            f"Escalation timestamp: {esc_date}.\n\n"
+            f"Technician Assignment Escalation – No Answer\n"
+            f"Ticket {tid} at {site_name} is assigned to {tech_name}.\n"
+            f"The technician did not answer after {attempt_no} call attempts.\n"
+            f"Issue: {desc}.\n"
+            f"Latest contact outcome: No answer.\n"
+            f"Total call attempts: {attempt_no}.\n"
+            f"Escalation timestamp: {esc_date}.\n"
             f"Please follow up in NexTask."
         )
 
