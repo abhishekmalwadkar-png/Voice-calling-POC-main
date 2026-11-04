@@ -2026,6 +2026,7 @@ def handle_push_records(payload):
     success_count = 0
     fail_count = 0
     already_exists_count = 0
+    already_exists_ids = []
     new_stored_count = 0
     current_time = now_iso()
 
@@ -2112,13 +2113,14 @@ def handle_push_records(payload):
 
                 if existing:
                     already_exists_count += 1
+                    already_exists_ids.append(tid)
                     success_count += 1
                     results.append({
                         "index": idx,
                         "task_id": tid,
                         "ticket_id": tid,
                         "status": "already_exists",
-                        "message": "ticket_id / task_id already exists",
+                        "message": f"ticket_id / task_id '{tid}' already exists in database",
                         "site_number": existing.get("site_number") or site_num,
                         "severity": existing.get("severity") or severity
                     })
@@ -2173,10 +2175,11 @@ def handle_push_records(payload):
         except Exception as e:
             logger.warning(f"PostgreSQL push records notice: {e}")
 
+    exists_str = f" ({', '.join(already_exists_ids)})" if already_exists_ids else ""
     if already_exists_count > 0 and new_stored_count == 0 and fail_count == 0:
-        summary_msg = "ticket_id / task_id already exists"
+        summary_msg = f"ticket_id / task_id already exists{exists_str}"
     elif already_exists_count > 0:
-        summary_msg = f"Processed {len(items)} record(s): {new_stored_count} stored successfully, {already_exists_count} already exists, {fail_count} failed"
+        summary_msg = f"Processed {len(items)} record(s): {new_stored_count} stored successfully, {already_exists_count} already exists{exists_str}, {fail_count} failed"
     else:
         summary_msg = f"Processed {len(items)} record(s): {success_count} stored successfully, {fail_count} failed"
 
@@ -2231,6 +2234,7 @@ def handle_update_records(payload):
     success_count = 0
     fail_count = 0
     already_exists_count = 0
+    already_exists_ids = []
     new_stored_count = 0
     current_time = now_iso()
 
