@@ -630,7 +630,7 @@ def dashboard_html():
               </div>
             </div>"""
 
-        wa_msgs = v.get("whatsapp_messages") or []
+        wa_msgs = v.get("sms_messages") or v.get("whatsapp_messages") or []
         wa_html = ""
         all_wamids = []
         all_wa_statuses = []

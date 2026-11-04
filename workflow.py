@@ -1189,7 +1189,6 @@ def ticket_view(tid):
         "pending_timers": timers,
         "calls": calls,
         "sms_messages": get_whatsapp_messages(t["ticket_id"]),
-        "whatsapp_messages": get_whatsapp_messages(t["ticket_id"]),
         "created_at": t["created_at"], "updated_at": t["updated_at"],
     }
 

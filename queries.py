@@ -105,11 +105,11 @@ def timeline(ticket_id):
         for w in wams:
             items.append({
                 "timestamp": w.get("sent_at") or w.get("submitted_at") or "",
-                "category": "whatsapp_dispatched",
-                "description": f"WhatsApp {w.get('message_type', 'Notification')} dispatched to {w.get('recipient_role', 'Recipient').capitalize()} ({w.get('mobile_number')}) via template '{w.get('template_name')}'",
+                "category": "sms_dispatched",
+                "description": f"SMS {w.get('message_type', 'Notification')} dispatched to {w.get('recipient_role', 'Recipient').capitalize()} ({w.get('mobile_number')}) via template '{w.get('template_name')}'",
                 "provider_message_id": w.get("provider_message_id"),
                 "status": w.get("delivery_status"),
-                "source": "whatsapp"
+                "source": "sms"
             })
     except Exception:
         pass
