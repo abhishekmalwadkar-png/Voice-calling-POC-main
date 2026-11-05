@@ -52,6 +52,8 @@ CFG = {
     # 360dialog WhatsApp
     "d360_api_key": _env("D360_API_KEY", "xCyHUYyCA24Dq6iWgISlP8hdAK"),
     "d360_api_url": _env("D360_API_URL", "https://waba-v2.360dialog.io/messages"),
+    # Twilio SMS alerts (on unless SMS_ENABLED=0). Voice calls and WhatsApp are not affected.
+    "sms_enabled": _env("SMS_ENABLED", "1") != "0",
     # Send a WhatsApp copy next to every SMS escalation alert (off unless WHATSAPP_ENABLED=1)
     "whatsapp_enabled": _env("WHATSAPP_ENABLED", "0") == "1",
     # PostgreSQL System Database (FLMHelpdesk)

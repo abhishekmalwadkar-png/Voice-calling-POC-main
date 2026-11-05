@@ -544,6 +544,10 @@ def _place_call(t, role, attempt, workflow, send_wa=True):
     return cid
 
 
+class _SmsDisabled(Exception):
+    """Raised internally to skip a Twilio SMS when SMS_ENABLED=0."""
+
+
 _SMS_CLAIMED = set()
 _SMS_CLAIM_LOCK = threading.Lock()
 
@@ -625,51 +629,57 @@ def send_sms_alert(t, role, rec, call_cid=None, alert_type_override=None, custom
     def _do_send():
         if wait_time > 0:
             time.sleep(wait_time)
+        sms_on = CFG.get("sms_enabled", True)
+        w_id = f"WF-{tid}-{t.get('assignment_id') or 'A1'}"
         sms_sid = None
         deliv_status = "failed"
         fail_reason = None
         try:
+            if not sms_on:
+                raise _SmsDisabled()
             sms_sid = twilio_client.send_sms(rec["mobile"], sms_body)
             deliv_status = "sent"
             print(f"[sms] Twilio SMS sent to {display_name} ({rec['mobile']}) - SID: {sms_sid}", flush=True)
             audit(tid, "sms_sent", f"{role_title} {alert_type.lower()} SMS sent to {display_name} ({rec['mobile']}) - SID: {sms_sid}", call_id=call_cid)
+        except _SmsDisabled:
+            audit(tid, "sms_skipped", f"SMS disabled (SMS_ENABLED=0): not sent to {role_title} ({display_name})", call_id=call_cid)
         except Exception as ex:  # noqa: BLE001
             fail_reason = str(ex)
             print(f"[sms] Failed to send SMS to {display_name} ({rec['mobile']}): {ex}", flush=True)
             audit(tid, "sms_error", f"Could not send SMS to {role_title} ({display_name}): {ex}", call_id=call_cid)
 
-        # Record message in database for timeline and audit inspection
-        w_id = f"WF-{tid}-{t.get('assignment_id') or 'A1'}"
-        record_whatsapp_message(
-            workflow_id=w_id,
-            ticket_id=tid,
-            assignment_id=t.get("assignment_id"),
-            recipient_role=role,
-            recipient_id=rec.get("id") or "",
-            recipient_name=rec.get("name") or display_name,
-            mobile_number=rec["mobile"],
-            message_type=f"{alert_type} SMS Alert",
-            provider_message_id=sms_sid,
-            template_name="sms_alert",
-            template_version="v1",
-            delivery_status=deliv_status,
-            submitted_at=submitted_time,
-            sent_at=now_iso(),
-            failure_reason=fail_reason
-        )
-        try:
-            import pg_store
-            pg_store.save_whatsapp_message_pg({
-                "workflow_id": w_id, "ticket_id": tid, "assignment_id": t.get("assignment_id"),
-                "recipient_role": role, "recipient_id": rec.get("id") or "",
-                "recipient_name": rec.get("name") or display_name, "mobile_number": rec["mobile"],
-                "message_type": f"{alert_type} SMS Alert", "provider_message_id": sms_sid,
-                "template_name": "sms_alert", "template_version": "v1",
-                "delivery_status": deliv_status, "submitted_at": submitted_time,
-                "sent_at": now_iso(), "failure_reason": fail_reason, "channel": "sms"
-            })
-        except Exception:
-            pass
+        if sms_on:
+            # Record message in database for timeline and audit inspection
+            record_whatsapp_message(
+                workflow_id=w_id,
+                ticket_id=tid,
+                assignment_id=t.get("assignment_id"),
+                recipient_role=role,
+                recipient_id=rec.get("id") or "",
+                recipient_name=rec.get("name") or display_name,
+                mobile_number=rec["mobile"],
+                message_type=f"{alert_type} SMS Alert",
+                provider_message_id=sms_sid,
+                template_name="sms_alert",
+                template_version="v1",
+                delivery_status=deliv_status,
+                submitted_at=submitted_time,
+                sent_at=now_iso(),
+                failure_reason=fail_reason
+            )
+            try:
+                import pg_store
+                pg_store.save_whatsapp_message_pg({
+                    "workflow_id": w_id, "ticket_id": tid, "assignment_id": t.get("assignment_id"),
+                    "recipient_role": role, "recipient_id": rec.get("id") or "",
+                    "recipient_name": rec.get("name") or display_name, "mobile_number": rec["mobile"],
+                    "message_type": f"{alert_type} SMS Alert", "provider_message_id": sms_sid,
+                    "template_name": "sms_alert", "template_version": "v1",
+                    "delivery_status": deliv_status, "submitted_at": submitted_time,
+                    "sent_at": now_iso(), "failure_reason": fail_reason, "channel": "sms"
+                })
+            except Exception:
+                pass
 
         # WhatsApp copy of the same alert (only when WHATSAPP_ENABLED=1). Never affects the SMS above.
         if CFG.get("whatsapp_enabled"):
@@ -776,9 +786,13 @@ def send_sms_closure(t, role, rec, resolution=None, closed_at=None, delay_sec=No
         if wait_time > 0:
             time.sleep(wait_time)
         try:
+            if not CFG.get("sms_enabled", True):
+                raise _SmsDisabled()
             sms_sid = twilio_client.send_sms(rec["mobile"], sms_body)
             print(f"[sms] Emergency closure SMS sent to {display_name} ({rec['mobile']}) - SID: {sms_sid}", flush=True)
             audit(tid, "sms_sent", f"{role_title} emergency closure SMS sent to {display_name} ({rec['mobile']}) - SID: {sms_sid}")
+        except _SmsDisabled:
+            audit(tid, "sms_skipped", f"SMS disabled (SMS_ENABLED=0): closure not sent to {role_title} ({display_name})")
         except Exception as ex:  # noqa: BLE001
             print(f"[sms] Failed to send closure SMS to {display_name} ({rec['mobile']}): {ex}", flush=True)
             audit(tid, "sms_error", f"Could not send closure SMS to {role_title} ({display_name}): {ex}")
