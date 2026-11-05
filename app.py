@@ -2196,6 +2196,7 @@ def dashboard_html():
       </div>
     </div>
     <div class="header-actions">
+      <a href="/reports" class="btn-header" title="Open operations reports (sample data)">Reports</a>
       <a href="/logout" class="btn-header" title="Log out from administrative session">
         <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path><polyline points="16 17 21 12 16 7"></polyline><line x1="21" y1="12" x2="9" y2="12"></line></svg>
         Logout
@@ -3813,7 +3814,7 @@ class Handler(BaseHTTPRequestHandler):
             if not CFG["api_key"] and not sent_key:
                 return self._from_this_pc()
             return False
-        if path in ("/", "/login", "/logout"):
+        if path in ("/", "/login", "/logout", "/reports"):
             return True
         return self._from_this_pc()
 
@@ -3866,6 +3867,18 @@ class Handler(BaseHTTPRequestHandler):
                     self.end_headers()
                     return
                 return self._send(200, dashboard_html(), extra={"Cache-Control": "no-cache, no-store, must-revalidate"})
+            if path == "/reports":
+                if not self._get_cookie_session():
+                    self.send_response(303)
+                    self.send_header("Location", "/login")
+                    self.send_header("Cache-Control", "no-cache, no-store, must-revalidate")
+                    self.end_headers()
+                    return
+                rp = os.path.join(config.BASE_DIR, "static", "reports.html")
+                if os.path.isfile(rp):
+                    with open(rp, "r", encoding="utf-8") as rf:
+                        return self._send(200, rf.read(), extra={"Cache-Control": "no-cache, no-store, must-revalidate"})
+                return self._json(404, {"error": "reports page not found"})
             if path in ("/docs", "/api/docs", "/documentation"):
                 return self._send(200, docs_html())
             if path == "/api/docs/raw":

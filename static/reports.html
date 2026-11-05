@@ -1,0 +1,268 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>NexTask Reports</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<script src="/static/chart.umd.min.js"></script>
+<style>
+  :root { --bg:#f8fafc; --card:#fff; --border:#e2e8f0; --text:#0f172a; --muted:#64748b; --primary:#0969da;
+          --ok:#059669; --warn:#d97706; --bad:#dc2626; --violet:#7c3aed; --slate:#94a3b8; }
+  * { box-sizing:border-box; margin:0; padding:0; }
+  body { font-family:'Inter',-apple-system,"Segoe UI",Roboto,sans-serif; background:var(--bg); color:var(--text); min-height:100vh; }
+  header { background:#0f172a; color:#fff; padding:12px 28px; display:flex; align-items:center; justify-content:space-between; }
+  .brand { font-size:15px; font-weight:700; letter-spacing:.2px; }
+  .nav { display:flex; gap:8px; }
+  .nav a { color:#e2e8f0; text-decoration:none; font-size:12px; font-weight:500; padding:6px 12px; border-radius:6px;
+           border:1px solid rgba(255,255,255,.15); background:rgba(255,255,255,.08); }
+  .nav a.active { background:#fff; color:#0f172a; border-color:#fff; }
+  .nav a:hover { background:rgba(255,255,255,.18); color:#fff; }
+  .nav a.active:hover { background:#fff; color:#0f172a; }
+  main { max-width:1400px; margin:0 auto; padding:22px 28px 40px; }
+  .title-row { display:flex; align-items:flex-end; justify-content:space-between; flex-wrap:wrap; gap:12px; margin-bottom:16px; }
+  h1 { font-size:20px; font-weight:800; }
+  .sub { font-size:12.5px; color:var(--muted); margin-top:2px; }
+  .controls { display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
+  select, .btn { font:inherit; font-size:12px; padding:7px 11px; border:1px solid var(--border); border-radius:7px; background:#fff; color:var(--text); cursor:pointer; }
+  .btn:hover, select:hover { border-color:#cbd5e1; background:#f8fafc; }
+  .btn.primary { background:var(--primary); border-color:var(--primary); color:#fff; font-weight:600; }
+  .btn.primary:hover { background:#0856b3; }
+  .switch { display:inline-flex; align-items:center; gap:7px; font-size:12px; font-weight:600; padding:6px 11px; border-radius:7px;
+            background:#fff7ed; border:1px solid #fed7aa; color:#9a3412; }
+  .switch input { accent-color:#ea580c; }
+  .switch.live-off { opacity:.95; }
+  .banner { font-size:12px; background:#fff7ed; border:1px solid #fed7aa; color:#9a3412; padding:8px 12px; border-radius:8px; margin-bottom:16px; }
+  .kpis { display:grid; grid-template-columns:repeat(auto-fit,minmax(190px,1fr)); gap:14px; margin-bottom:18px; }
+  .kpi { background:var(--card); border:1px solid var(--border); border-radius:10px; padding:14px 16px; }
+  .kpi .l { font-size:11px; font-weight:700; color:var(--muted); text-transform:uppercase; letter-spacing:.5px; }
+  .kpi .v { font-size:26px; font-weight:800; margin:6px 0 4px; }
+  .kpi .d { font-size:11.5px; font-weight:600; }
+  .up { color:var(--ok); } .down { color:var(--bad); } .flat { color:var(--muted); }
+  .grid { display:grid; grid-template-columns:repeat(12,1fr); gap:14px; }
+  .card { background:var(--card); border:1px solid var(--border); border-radius:10px; padding:16px; }
+  .card h3 { font-size:13.5px; font-weight:700; }
+  .card .hint { font-size:11.5px; color:var(--muted); margin:2px 0 12px; }
+  .c4 { grid-column:span 4; } .c6 { grid-column:span 6; } .c8 { grid-column:span 8; } .c12 { grid-column:span 12; }
+  .chart { position:relative; height:260px; }
+  table { width:100%; border-collapse:collapse; font-size:12.5px; }
+  th { text-align:left; font-size:11px; text-transform:uppercase; letter-spacing:.4px; color:var(--muted); padding:8px 10px; border-bottom:1px solid var(--border); }
+  td { padding:9px 10px; border-bottom:1px solid #f1f5f9; }
+  td.num, th.num { text-align:right; font-variant-numeric:tabular-nums; }
+  .pill { display:inline-block; font-size:11px; font-weight:700; padding:2px 8px; border-radius:999px; }
+  .pill.good { background:#ecfdf5; color:#047857; } .pill.mid { background:#fffbeb; color:#b45309; } .pill.low { background:#fef2f2; color:#b91c1c; }
+  .bar { height:6px; border-radius:3px; background:#e2e8f0; overflow:hidden; min-width:70px; }
+  .bar > i { display:block; height:100%; background:var(--ok); }
+  @media (max-width:1000px) { .c4,.c6,.c8 { grid-column:span 12; } main { padding:16px; } }
+  @media print { header, .controls, .banner { display:none; } body { background:#fff; } .card, .kpi { break-inside:avoid; } main { padding:0; } }
+</style>
+</head>
+<body>
+<header>
+  <div class="brand">NexTask Voice Operations &amp; Audit Center</div>
+  <div class="nav">
+    <a href="/">Dashboard</a>
+    <a href="/reports" class="active">Reports</a>
+    <a href="/logout">Logout</a>
+  </div>
+</header>
+
+<main>
+  <div class="title-row">
+    <div>
+      <h1>Operations Reports</h1>
+      <div class="sub">Task response, escalation and notification performance</div>
+    </div>
+    <div class="controls">
+      <label class="switch" title="Sample data is a fixed demo dataset. Live data is not connected yet.">
+        <input type="checkbox" id="sampleToggle" checked> Sample data
+      </label>
+      <select id="range" title="Date range">
+        <option value="7">Last 7 days</option>
+        <option value="30" selected>Last 30 days</option>
+        <option value="90">Last 90 days</option>
+      </select>
+      <select id="site" title="Site filter">
+        <option value="all">All sites</option>
+        <option>Riyadh North</option><option>Riyadh East</option><option>Jeddah Central</option><option>Dammam Port</option>
+      </select>
+      <button class="btn" onclick="exportCsv()">Export CSV</button>
+      <button class="btn primary" onclick="window.print()">Print / Save PDF</button>
+    </div>
+  </div>
+
+  <div class="banner" id="banner">Showing <b>sample data</b> for demonstration. These numbers are not from your database.</div>
+
+  <div class="kpis" id="kpis"></div>
+
+  <div class="grid">
+    <div class="card c8"><h3>Tasks over time</h3><div class="hint">Tasks received per day by final status</div><div class="chart"><canvas id="chTrend"></canvas></div></div>
+    <div class="card c4"><h3>Rejection reasons</h3><div class="hint">Why technicians declined an assignment</div><div class="chart"><canvas id="chReasons"></canvas></div></div>
+
+    <div class="card c6"><h3>Escalation funnel</h3><div class="hint">Who was reached at each stage</div><div class="chart"><canvas id="chFunnel"></canvas></div></div>
+    <div class="card c6"><h3>Technician outcomes</h3><div class="hint">First-call result per technician</div><div class="chart"><canvas id="chTech"></canvas></div></div>
+
+    <div class="card c4"><h3>Call outcomes</h3><div class="hint">Result of every voice call placed</div><div class="chart"><canvas id="chCalls"></canvas></div></div>
+    <div class="card c4"><h3>Language usage</h3><div class="hint">Language chosen on calls</div><div class="chart"><canvas id="chLang"></canvas></div></div>
+    <div class="card c4"><h3>SMS delivery</h3><div class="hint">SMS alerts by recipient role</div><div class="chart"><canvas id="chSms"></canvas></div></div>
+
+    <div class="card c12">
+      <h3>Technician performance</h3><div class="hint">Acknowledgement rate and response time per technician</div>
+      <table id="techTable"><thead><tr>
+        <th>Technician</th><th class="num">Assigned</th><th class="num">Accepted</th><th class="num">Rejected</th><th class="num">No answer</th>
+        <th class="num">Reassigned</th><th class="num">Avg ack time</th><th>Acknowledgement rate</th>
+      </tr></thead><tbody></tbody></table>
+    </div>
+  </div>
+</main>
+
+<script>
+(function () {
+  // ---- deterministic sample data (seeded so numbers stay stable between reloads) ----
+  function rng(seed) { var s = seed >>> 0; return function () { s = (s * 1664525 + 1013904223) >>> 0; return s / 4294967296; }; }
+  var TECHS = ['Ali', 'Omar', 'Faisal', 'Yousef', 'Khalid', 'Hassan'];
+  var SITES = ['Riyadh North', 'Riyadh East', 'Jeddah Central', 'Dammam Port'];
+
+  function build(days, site) {
+    var r = rng(days * 7 + (site === 'all' ? 1 : site.length * 13));
+    var scale = site === 'all' ? 1 : 0.35;
+    var labels = [], ack = [], esc = [], unres = [];
+    var today = new Date();
+    for (var i = days - 1; i >= 0; i--) {
+      var d = new Date(today); d.setDate(today.getDate() - i);
+      labels.push(d.toLocaleDateString('en-GB', { day: '2-digit', month: 'short' }));
+      var total = Math.round((8 + r() * 10) * scale);
+      var e = Math.round(total * (0.12 + r() * 0.12));
+      var u = Math.round(total * (0.02 + r() * 0.05));
+      ack.push(Math.max(total - e - u, 0)); esc.push(e); unres.push(u);
+    }
+    var sum = function (a) { return a.reduce(function (x, y) { return x + y; }, 0); };
+    var tasks = sum(ack) + sum(esc) + sum(unres);
+
+    var tech = TECHS.map(function (n, idx) {
+      var assigned = Math.round((tasks / TECHS.length) * (0.8 + r() * 0.4));
+      var rej = Math.round(assigned * (0.05 + r() * 0.1));
+      var na = Math.round(assigned * (0.06 + r() * 0.12));
+      var acc = Math.max(assigned - rej - na, 0);
+      return { name: n, assigned: assigned, accepted: acc, rejected: rej, noans: na,
+               reassigned: Math.round(rej * (0.5 + r() * 0.4)), avg: +(1.2 + r() * 3.2).toFixed(1) };
+    });
+
+    var reasons = [Math.round(tasks * 0.05), Math.round(tasks * 0.03), Math.round(tasks * 0.025), Math.round(tasks * 0.015)];
+    var techCalls = sum(tech.map(function (t) { return t.assigned; })) + Math.round(tasks * 0.15);
+    var tlCalls = sum(esc) + sum(unres);
+    var mgCalls = Math.round(tlCalls * 0.4);
+    var calls = {
+      Completed: Math.round((techCalls + tlCalls + mgCalls) * 0.78),
+      'No answer': Math.round((techCalls + tlCalls + mgCalls) * 0.14),
+      Busy: Math.round((techCalls + tlCalls + mgCalls) * 0.05),
+      Failed: Math.round((techCalls + tlCalls + mgCalls) * 0.03)
+    };
+    var lang = { English: Math.round(techCalls * 0.46), Arabic: Math.round(techCalls * 0.34), Hindi: Math.round(techCalls * 0.14), Urdu: Math.round(techCalls * 0.06) };
+    var smsTech = Math.round(tasks * 0.2), smsTl = tlCalls, smsMgr = tlCalls;
+    var sms = {
+      Technician: [Math.round(smsTech * 0.95), Math.round(smsTech * 0.04)],
+      'Team leader': [Math.round(smsTl * 0.96), Math.round(smsTl * 0.03)],
+      Manager: [Math.round(smsMgr * 0.97), Math.round(smsMgr * 0.02)]
+    };
+    var smsDelivered = sms.Technician[0] + sms['Team leader'][0] + sms.Manager[0];
+    var smsFailed = sms.Technician[1] + sms['Team leader'][1] + sms.Manager[1];
+    var acked = sum(ack);
+    var avgAck = +(tech.reduce(function (a, t) { return a + t.avg * t.assigned; }, 0) / Math.max(sum(tech.map(function (t) { return t.assigned; })), 1)).toFixed(1);
+
+    return { labels: labels, ack: ack, esc: esc, unres: unres, tasks: tasks, acked: acked, escCount: sum(esc), unresCount: sum(unres),
+             tech: tech, reasons: reasons, funnel: [tasks, tlCalls, mgCalls, Math.round(mgCalls * 0.7)], calls: calls, lang: lang, sms: sms,
+             smsRate: (smsDelivered / Math.max(smsDelivered + smsFailed, 1) * 100), avgAck: avgAck };
+  }
+
+  // ---- rendering ----
+  var charts = {};
+  function mk(id, cfg) { if (charts[id]) charts[id].destroy(); charts[id] = new Chart(document.getElementById(id), cfg); }
+  var C = { ok: '#059669', blue: '#0969da', warn: '#d97706', bad: '#dc2626', violet: '#7c3aed', slate: '#94a3b8', teal: '#0d9488' };
+  Chart.defaults.font.family = "'Inter', sans-serif"; Chart.defaults.font.size = 11; Chart.defaults.color = '#64748b';
+  var opts = { responsive: true, maintainAspectRatio: false, plugins: { legend: { position: 'bottom', labels: { boxWidth: 10, usePointStyle: true } } } };
+
+  function kpi(label, value, delta, cls) {
+    return '<div class="kpi"><div class="l">' + label + '</div><div class="v">' + value + '</div><div class="d ' + cls + '">' + delta + '</div></div>';
+  }
+
+  function render() {
+    var days = +document.getElementById('range').value;
+    var site = document.getElementById('site').value;
+    var d = build(days, site);
+    var ackPct = (d.acked / Math.max(d.tasks, 1) * 100);
+
+    document.getElementById('kpis').innerHTML =
+      kpi('Total tasks', d.tasks, '&#9650; 6.2% vs previous period', 'up') +
+      kpi('Acknowledged', ackPct.toFixed(1) + '%', '&#9650; 2.1 pts', 'up') +
+      kpi('Avg ack time', d.avgAck + ' min', '&#9660; 0.4 min faster', 'up') +
+      kpi('Escalation rate', (d.escCount / Math.max(d.tasks, 1) * 100).toFixed(1) + '%', '&#9650; 0.8 pts', 'down') +
+      kpi('Unresolved', d.unresCount, 'Needs follow-up', 'flat') +
+      kpi('SMS delivery', d.smsRate.toFixed(1) + '%', 'Across all roles', 'flat');
+
+    mk('chTrend', { type: 'bar', data: { labels: d.labels, datasets: [
+      { label: 'Acknowledged', data: d.ack, backgroundColor: C.ok, stack: 's' },
+      { label: 'Escalated', data: d.esc, backgroundColor: C.warn, stack: 's' },
+      { label: 'Unresolved', data: d.unres, backgroundColor: C.bad, stack: 's' }] },
+      options: Object.assign({}, opts, { scales: { x: { stacked: true, grid: { display: false }, ticks: { maxTicksLimit: 12 } }, y: { stacked: true, beginAtZero: true } } }) });
+
+    mk('chReasons', { type: 'doughnut', data: { labels: ['Busy on another site', 'On leave / off duty', 'Equipment or transport', 'Other / personal'],
+      datasets: [{ data: d.reasons, backgroundColor: [C.blue, C.violet, C.warn, C.slate], borderWidth: 0 }] }, options: Object.assign({}, opts, { cutout: '62%' }) });
+
+    mk('chFunnel', { type: 'bar', data: { labels: ['Technician called', 'Team leader called', 'Manager called', 'Manager reached'],
+      datasets: [{ data: d.funnel, backgroundColor: [C.blue, C.warn, C.violet, C.ok], borderRadius: 4 }] },
+      options: Object.assign({}, opts, { indexAxis: 'y', plugins: { legend: { display: false } }, scales: { x: { beginAtZero: true }, y: { grid: { display: false } } } }) });
+
+    mk('chTech', { type: 'bar', data: { labels: d.tech.map(function (t) { return t.name; }), datasets: [
+      { label: 'Accepted', data: d.tech.map(function (t) { return t.accepted; }), backgroundColor: C.ok, stack: 's' },
+      { label: 'Rejected', data: d.tech.map(function (t) { return t.rejected; }), backgroundColor: C.bad, stack: 's' },
+      { label: 'No answer', data: d.tech.map(function (t) { return t.noans; }), backgroundColor: C.slate, stack: 's' }] },
+      options: Object.assign({}, opts, { scales: { x: { stacked: true, grid: { display: false } }, y: { stacked: true, beginAtZero: true } } }) });
+
+    mk('chCalls', { type: 'doughnut', data: { labels: Object.keys(d.calls), datasets: [{ data: Object.values(d.calls), backgroundColor: [C.ok, C.slate, C.warn, C.bad], borderWidth: 0 }] },
+      options: Object.assign({}, opts, { cutout: '62%' }) });
+    mk('chLang', { type: 'doughnut', data: { labels: Object.keys(d.lang), datasets: [{ data: Object.values(d.lang), backgroundColor: [C.blue, C.teal, C.violet, C.warn], borderWidth: 0 }] },
+      options: Object.assign({}, opts, { cutout: '62%' }) });
+    mk('chSms', { type: 'bar', data: { labels: Object.keys(d.sms), datasets: [
+      { label: 'Delivered', data: Object.values(d.sms).map(function (v) { return v[0]; }), backgroundColor: C.ok, stack: 's' },
+      { label: 'Failed', data: Object.values(d.sms).map(function (v) { return v[1]; }), backgroundColor: C.bad, stack: 's' }] },
+      options: Object.assign({}, opts, { scales: { x: { stacked: true, grid: { display: false } }, y: { stacked: true, beginAtZero: true } } }) });
+
+    var tb = document.querySelector('#techTable tbody');
+    tb.innerHTML = d.tech.map(function (t) {
+      var rate = t.accepted / Math.max(t.assigned, 1) * 100;
+      var cls = rate >= 85 ? 'good' : rate >= 70 ? 'mid' : 'low';
+      return '<tr><td><b>' + t.name + '</b></td><td class="num">' + t.assigned + '</td><td class="num">' + t.accepted + '</td><td class="num">' + t.rejected +
+        '</td><td class="num">' + t.noans + '</td><td class="num">' + t.reassigned + '</td><td class="num">' + t.avg + ' min</td>' +
+        '<td><div style="display:flex;align-items:center;gap:8px;"><div class="bar" style="flex:1"><i style="width:' + rate.toFixed(0) + '%"></i></div>' +
+        '<span class="pill ' + cls + '">' + rate.toFixed(0) + '%</span></div></td></tr>';
+    }).join('');
+    window.__techRows = d.tech;
+  }
+
+  window.exportCsv = function () {
+    var rows = [['Technician', 'Assigned', 'Accepted', 'Rejected', 'No answer', 'Reassigned', 'Avg ack time (min)']];
+    (window.__techRows || []).forEach(function (t) { rows.push([t.name, t.assigned, t.accepted, t.rejected, t.noans, t.reassigned, t.avg]); });
+    var csv = rows.map(function (r) { return r.join(','); }).join('\n');
+    var a = document.createElement('a');
+    a.href = URL.createObjectURL(new Blob([csv], { type: 'text/csv' }));
+    a.download = 'technician_performance_sample.csv'; a.click();
+  };
+
+  // Live data is not connected yet: the switch stays on sample data.
+  var toggle = document.getElementById('sampleToggle');
+  toggle.addEventListener('change', function () {
+    if (!toggle.checked) {
+      toggle.checked = true;
+      document.getElementById('banner').innerHTML = 'Live data is <b>not connected yet</b>. Showing <b>sample data</b> for demonstration.';
+    }
+  });
+  document.getElementById('range').addEventListener('change', render);
+  document.getElementById('site').addEventListener('change', render);
+  render();
+})();
+</script>
+</body>
+</html>
