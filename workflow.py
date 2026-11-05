@@ -12,6 +12,7 @@ import threading
 import time
 import urllib.error
 import urllib.request
+from datetime import datetime
 
 import ae_whatsapp
 import texts
@@ -584,6 +585,18 @@ def send_sms_alert(t, role, rec, call_cid=None, alert_type_override=None, custom
     reason = t.get("esc_reason") or ("emergency" if is_emergency else "no_acknowledgement")
     reject_reason_text = t.get("uc1_reject_reason") or "Declined assignment"
 
+    # Emergency opening only: status shown in the SMS and the WhatsApp template. An escalation always says
+    # "Escalated"; otherwise tb_tickets.ticket_status, falling back to "New" when the ticket has no row.
+    emergency_status = None
+    if is_emergency:
+        emergency_status = "Escalated" if "Escalation" in alert_type else "New"
+        if emergency_status == "New":
+            try:
+                import pg_store
+                emergency_status = " ".join((pg_store.get_ticket_status_pg(tid) or "New").split())
+            except Exception:  # noqa: BLE001
+                emergency_status = "New"
+
     # Format escalation date as DD-Mon-YYYY (e.g. 04-Nov-2026)
     try:
         esc_date = datetime.now().strftime("%d-%b-%Y %I:%M %p")
@@ -607,6 +620,7 @@ def send_sms_alert(t, role, rec, call_cid=None, alert_type_override=None, custom
             f"Ticket {tid} at {site_name} is assigned to {tech_name}.\n"
             f"Severity: Emergency.\n"
             f"Issue: {desc}.\n"
+            f"Status: {emergency_status}.\n"
             f"Total call attempts: {attempt_no}.\n"
             f"Escalation timestamp: {esc_date}.\n"
             f"Please follow up in NexTask."
@@ -685,7 +699,7 @@ def send_sms_alert(t, role, rec, call_cid=None, alert_type_override=None, custom
         if CFG.get("whatsapp_enabled"):
             try:
                 _send_whatsapp_copy(t, role, rec, display_name, w_id, alert_type, is_emergency, reason,
-                                    tech_name, attempt_no, site_name, reject_reason_text, desc)
+                                    tech_name, attempt_no, site_name, reject_reason_text, desc, emergency_status)
             except Exception as ex:  # noqa: BLE001
                 print(f"[whatsapp] unexpected error for {display_name}: {ex}", flush=True)
 
@@ -696,12 +710,12 @@ def send_sms_alert(t, role, rec, call_cid=None, alert_type_override=None, custom
 
 
 def _send_whatsapp_copy(t, role, rec, display_name, w_id, alert_type, is_emergency, reason,
-                        tech_name, attempt_no, site_name, reject_reason_text, desc=None):
+                        tech_name, attempt_no, site_name, reject_reason_text, desc=None, emergency_status=None):
     """Send the escalation alert on WhatsApp too (360dialog template) and log it as its own row."""
     tid = t["ticket_id"]
     if is_emergency:
         # Emergency template shabakkat_emergency_opening1; its last parameter is the status text.
-        status = "Escalated" if "Escalation" in alert_type else "New"
+        status = emergency_status or ("Escalated" if "Escalation" in alert_type else "New")
         template = "shabakkat_emergency_opening1"
         send = lambda: ae_whatsapp.send_emergency_opening_alert(  # noqa: E731
             rec["mobile"], tid, site_name, t.get("severity") or "Emergency", desc or t.get("description") or "-",

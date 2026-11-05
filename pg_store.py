@@ -848,6 +848,28 @@ def audit_rows_pg(date_from="", date_to="", ticket_id="", limit=50000):
     return out
 
 
+def get_ticket_status_pg(ticket_id):
+    """ticket_status of a ticket in public.tb_tickets, or None when there is no row or no database."""
+    conn = get_connection()
+    if not conn:
+        return None
+    try:
+        with conn.cursor() as cur:
+            cur.execute("SELECT ticket_status FROM public.tb_tickets WHERE UPPER(ticket_id)=UPPER(%s) LIMIT 1",
+                        (str(ticket_id).strip().upper(),))
+            row = cur.fetchone()
+        conn.commit()
+        return (str(row[0]).strip() or None) if row and row[0] else None
+    except Exception:
+        try:
+            conn.rollback()
+        except Exception:
+            pass
+        return None
+    finally:
+        release_connection(conn)
+
+
 def ticket_exists_pg(ticket_id):
     """Check if ticket exists in PostgreSQL tb_tickets."""
     conn = get_connection()
