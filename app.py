@@ -705,8 +705,13 @@ def dashboard_html():
         all_workflows = []
         calls_html = ""
 
+        _rem_no = 0
         for c in v.get("calls", []):
-            role_title = f"{safe_esc(c.get('role', 'Technician')).capitalize()} #{c.get('attempt_no', 1)}"
+            if c.get("is_reminder"):
+                _rem_no += 1
+                role_title = f"Reminder call #{_rem_no}"
+            else:
+                role_title = f"{safe_esc(c.get('role', 'Technician')).capitalize()} #{c.get('attempt_no', 1)}"
             c_status = safe_esc(c.get("status") or "unknown")
             c_lang_raw = c.get("language")
             c_lang = safe_esc(full_lang_name(c_lang_raw) if c_lang_raw and c_lang_raw != "-" else "-")

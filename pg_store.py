@@ -820,26 +820,45 @@ _ACTIVE_CALL_STATUSES = {"queued", "initiating", "initiated", "ringing", "in-pro
 _ROLE_NAMES = (("technician", "Technician"), ("team_leader", "Team leader"), ("manager", "Manager"))
 
 
+_ACK_STATUSES = {"ACCEPTED", "ACKNOWLEDGED", "VALID"}      # "valid" = the accept key was pressed
+_NO_KEY_STATUSES = {"", "PENDING", "NO_DIGIT", "NO_INPUT", "NO_KEY"}
+
+
+def _call_response(c, is_ack, is_reminder):
+    """What happened on a call, as short text, from a saved tb_voice_calls row (never 'in progress' for a finished call)."""
+    status = str(c.get("call_status") or "").strip().lower()
+    dtmf_status = str(c.get("dtmf_status") or "").strip().upper()
+    dtmf = str(c.get("captured_digit") or "")
+    if is_ack:
+        return "acknowledged"
+    if "reason:" in dtmf or dtmf_status == "REJECTED":
+        digit = dtmf.split("reason:", 1)[1][:1] if "reason:" in dtmf else ""
+        return "rejected" + (f" ({_REJECT_REASONS.get(digit, 'Other / unspecified')})" if digit else "")
+    if dtmf_status == "VALID":
+        return "responded (key pressed)"      # e.g. team leader / manager answered the reassign question
+    if c.get("failure_reason"):
+        return str(c["failure_reason"])
+    if status in _ACTIVE_CALL_STATUSES:
+        return "call in progress"
+    if status in ("no-answer", "no_answer"):
+        return "no answer"
+    if status == "busy":
+        return "busy"
+    if status in ("failed", "canceled", "cancelled"):
+        return status
+    if status == "completed" or c.get("ended_at"):
+        if is_reminder:
+            return "reminder answered"
+        if dtmf_status in _NO_KEY_STATUSES:
+            return "answered, no key pressed"
+        return dtmf_status.lower().replace("_", " ")
+    return "call in progress"
+
+
 def _call_result_text(c):
-    """One short phrase for what happened on a call, from the saved call row."""
-    dtmf = str(c.get("dtmf") or "")
-    status = str(c.get("status") or "").lower()
-    if c.get("response") == "acknowledged":
-        text = "acknowledged"
-    elif "reason:" in dtmf:
-        digit = dtmf.split("reason:", 1)[1][:1]
-        text = "rejected (" + _REJECT_REASONS.get(digit, "Other / unspecified") + ")"
-    elif status in ("no-answer", "no_answer"):
-        text = "no answer"
-    elif status == "busy":
-        text = "busy"
-    elif status in ("failed", "canceled"):
-        text = status
-    elif status == "completed":
-        text = "answered, no key pressed"
-    else:
-        text = "in progress"
-    if c.get("superseded") and text in ("in progress", "answered, no key pressed"):
+    """Phrase used in the card Summary for one call."""
+    text = str(c.get("response") or "call in progress")
+    if c.get("superseded") and text == "call in progress":
         text = "ended, task reassigned"
     return text
 
@@ -848,10 +867,14 @@ def _ticket_summary(t_calls, wa_rows, recipients):
     """Plain-text summary shown on a task card: call results per person, alerts sent, reassignment."""
     parts = []
     for role, name in _ROLE_NAMES:
-        mine = [c for c in t_calls if c.get("role") == role]
+        mine = [c for c in t_calls if str(c.get("role") or "").lower() == role and not c.get("is_reminder")]
         if mine:
             parts.append(f"{name}: " + "; ".join(
                 f"call {c.get('attempt_no') or 1} {_call_result_text(c)}" for c in mine) + ".")
+    reminders = [c for c in t_calls if c.get("is_reminder")]
+    if reminders:
+        parts.append("Follow-up reminders: " + "; ".join(
+            f"call {i} {_call_result_text(c)}" for i, c in enumerate(reminders, 1)) + ".")
     sent = {}
     for w in wa_rows:
         chan = "WhatsApp" if str(w.get("channel") or "").lower() == "whatsapp" else "SMS"
@@ -950,16 +973,29 @@ def dashboard_data(limit=1000):
         for c in calls:
             if c["assignment_id"] not in aids:
                 continue
-            digit_ok = str(c.get("dtmf_status") or "").upper() in ("ACCEPTED", "ACKNOWLEDGED")
+            role = str(c.get("recipient_role") or "technician").strip().lower()
+            is_reminder = "reminder" in (str(c.get("workflow_id") or "") + " " + str(c.get("call_type") or "")).lower()
+            # Only the technician's own assignment call can acknowledge; a reminder or an escalation call cannot.
+            digit_ok = (not is_reminder and role == "technician"
+                        and str(c.get("dtmf_status") or "").strip().upper() in _ACK_STATUSES)
             t_calls.append({
-                "id": c["id"], "role": c.get("recipient_role") or "technician", "workflow": c.get("workflow_id") or "",
+                "id": c["id"], "role": role, "workflow": c.get("workflow_id") or "", "is_reminder": is_reminder,
                 "attempt_no": c.get("attempt_number") or 1, "recipient_name": c.get("recipient_name"),
                 "to_number": c.get("mobile_number"), "language": c.get("language"),
                 "call_sid": c.get("provider_call_id"), "status": c.get("call_status"), "dtmf": c.get("captured_digit"),
                 "outcome": (c.get("dtmf_status") or "").lower() or None,
-                "response": "acknowledged" if digit_ok else (c.get("failure_reason") or c.get("dtmf_status") or "call in progress"),
+                "response": _call_response(c, digit_ok, is_reminder),
                 "created_at": _iso(c.get("started_at")), "ended_at": _iso(c.get("ended_at")),
                 "superseded": c["assignment_id"] != cur_aid, "_ack": digit_ok})
+        # Once the technician has acknowledged, any later technician call is a follow-up reminder
+        # (no key is expected), even when the saved row is not tagged as a reminder.
+        first_ack = next((i for i, c in enumerate(t_calls) if c["_ack"] and not c["superseded"]), None)
+        if first_ack is not None:
+            for c in t_calls[first_ack + 1:]:
+                if c["role"] == "technician" and not c["_ack"] and not c["superseded"] and not c["is_reminder"]:
+                    c["is_reminder"] = True
+                    if c["response"] == "answered, no key pressed":
+                        c["response"] = "reminder answered"
         live = [c for c in t_calls if not c["superseded"]]
         acked = any(c["_ack"] for c in live) or \
             str((cur or {}).get("assignment_status") or "").lower() in ("accepted", "acknowledged")
