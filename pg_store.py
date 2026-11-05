@@ -774,6 +774,52 @@ def save_updated_records(items):
         release_connection(conn)
 
 
+AUDIT_PG_COLUMNS = ["created_at", "ticket_id", "assignment_id", "workflow_id", "event_id", "activity_type",
+                    "activity_description", "activity_status", "reference_id", "details_json"]
+
+
+def audit_rows_pg(date_from="", date_to="", ticket_id="", limit=50000):
+    """Rows of public.tb_audit_logs for the audit-log export (newest last). [] when PostgreSQL is unreachable."""
+    conn = get_connection()
+    if not conn:
+        return []
+    try:
+        from psycopg2.extras import RealDictCursor
+        where, args = [], []
+        if date_from:
+            where.append("created_at >= %s::timestamptz")
+            args.append(date_from)
+        if date_to and date_to != "9999":
+            where.append("created_at <= %s::timestamptz")
+            args.append(date_to)
+        if ticket_id:
+            where.append("UPPER(ticket_id) = UPPER(%s)")
+            args.append(ticket_id)
+        sql = ("SELECT " + ", ".join(AUDIT_PG_COLUMNS) + " FROM public.tb_audit_logs"
+               + (" WHERE " + " AND ".join(where) if where else "") + " ORDER BY created_at, id LIMIT %s")
+        with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            cur.execute(sql, (*args, int(limit)))
+            rows = cur.fetchall()
+        conn.commit()
+    except Exception as e:
+        try:
+            conn.rollback()
+        except Exception:
+            pass
+        logger.error(f"Error reading audit logs for export: {e}")
+        return []
+    finally:
+        release_connection(conn)
+    out = []
+    for r in rows:
+        d = dict(r)
+        d["created_at"] = _iso(d.get("created_at"))
+        if d.get("details_json") is not None and not isinstance(d["details_json"], str):
+            d["details_json"] = json.dumps(d["details_json"], ensure_ascii=False)
+        out.append(d)
+    return out
+
+
 def ticket_exists_pg(ticket_id):
     """Check if ticket exists in PostgreSQL tb_tickets."""
     conn = get_connection()
@@ -863,14 +909,25 @@ def _call_result_text(c):
     return text
 
 
-def _ticket_summary(t_calls, wa_rows, recipients):
+def _ticket_summary(t_calls, wa_rows, recipients, tech_names=None):
     """Plain-text summary shown on a task card: call results per person, alerts sent, reassignment."""
     parts = []
+    tech_names = tech_names or {}
     for role, name in _ROLE_NAMES:
         mine = [c for c in t_calls if str(c.get("role") or "").lower() == role and not c.get("is_reminder")]
-        if mine:
-            parts.append(f"{name}: " + "; ".join(
-                f"call {c.get('attempt_no') or 1} {_call_result_text(c)}" for c in mine) + ".")
+        if not mine:
+            continue
+        groups = []                                   # one group per assignment, in call order
+        for c in mine:
+            if not groups or groups[-1][0] != c.get("assignment_id"):
+                groups.append((c.get("assignment_id"), []))
+            groups[-1][1].append(c)
+        for aid, calls in groups:
+            label = name
+            if role == "technician" and len(groups) > 1:
+                label = tech_names.get(aid) or name   # show who was called when the ticket was reassigned
+            parts.append(f"{label}: " + "; ".join(
+                f"call {c.get('attempt_no') or 1} {_call_result_text(c)}" for c in calls) + ".")
     reminders = [c for c in t_calls if c.get("is_reminder")]
     if reminders:
         parts.append("Follow-up reminders: " + "; ".join(
@@ -886,7 +943,7 @@ def _ticket_summary(t_calls, wa_rows, recipients):
         parts.append("Alerts: " + "; ".join(f"{chan} to {', '.join(who)}" for chan, who in sent.items()) + ".")
     prev = (recipients or {}).get("previous_technician") or {}
     cur = (recipients or {}).get("technician") or {}
-    if prev.get("name"):
+    if prev.get("name") and prev.get("name") != cur.get("name"):
         parts.append(f"Reassigned from {prev['name']}" + (f" to {cur['name']}" if cur.get("name") else "") + ".")
     return " ".join(parts)
 
@@ -923,6 +980,10 @@ def dashboard_data(limit=1000):
             cur.execute("SELECT COUNT(*) AS n FROM public.tb_whatsapp_messages "
                         "WHERE LOWER(delivery_status) IN ('delivered','read')")
             wa_delivered = cur.fetchone()["n"]
+            cur.execute("SELECT COUNT(*) AS n FROM public.tb_whatsapp_messages "
+                        "WHERE LOWER(COALESCE(message_type,'')) LIKE '%whatsapp%' "
+                        "OR LOWER(COALESCE(template_name,'')) LIKE 'shabakkat%'")
+            wa_whatsapp = cur.fetchone()["n"]
             cur.execute("SELECT COUNT(*) AS n FROM public.tb_voice_calls")
             calls_total = cur.fetchone()["n"]
             cur.execute("SELECT COUNT(*) AS n FROM public.tb_voice_calls WHERE LOWER(call_status)='completed'")
@@ -980,6 +1041,7 @@ def dashboard_data(limit=1000):
                         and str(c.get("dtmf_status") or "").strip().upper() in _ACK_STATUSES)
             t_calls.append({
                 "id": c["id"], "role": role, "workflow": c.get("workflow_id") or "", "is_reminder": is_reminder,
+                "assignment_id": c["assignment_id"],
                 "attempt_no": c.get("attempt_number") or 1, "recipient_name": c.get("recipient_name"),
                 "to_number": c.get("mobile_number"), "language": c.get("language"),
                 "call_sid": c.get("provider_call_id"), "status": c.get("call_status"), "dtmf": c.get("captured_digit"),
@@ -1025,7 +1087,9 @@ def dashboard_data(limit=1000):
             "last_event_id": None, "recipients": recipients, "calls": t_calls, "acknowledged": acked,
             "call_active": call_active,
             "call_workflow": {"state": state, "acknowledged": acked,
-                              "response_summary": _ticket_summary(t_calls, [w for w in wa if w["ticket_id"] == tid], recipients)},
+                              "response_summary": _ticket_summary(
+                                  t_calls, [w for w in wa if w["ticket_id"] == tid], recipients,
+                                  {a["assignment_id"]: a.get("technician_name") for a in by_ticket.get(tid, [])})},
             "followup": {},
             "whatsapp_messages": [
                 {"recipient_role": w.get("recipient_role"), "recipient_name": w.get("recipient_name"),
@@ -1034,5 +1098,6 @@ def dashboard_data(limit=1000):
                  "delivery_status": w.get("delivery_status"), "provider_message_id": w.get("provider_message_id"),
                  "sent_at": _iso(w.get("sent_at")), "submitted_at": _iso(w.get("submitted_at"))}
                 for w in wa if w["ticket_id"] == tid]})
-    return {"tickets": views, "wa_total": wa_total, "wa_delivered": wa_delivered, "calls_total": calls_total,
+    return {"tickets": views, "wa_total": wa_total, "wa_delivered": wa_delivered,
+            "wa_whatsapp": wa_whatsapp, "wa_sms": max(wa_total - wa_whatsapp, 0), "calls_total": calls_total,
             "calls_completed": calls_completed, "calls_failed": calls_failed}

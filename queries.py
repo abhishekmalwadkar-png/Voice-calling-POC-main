@@ -183,6 +183,11 @@ def export(params):
     elif kind == "calls":
         cols, rows = CALL_COLUMNS, q(f"SELECT {', '.join(CALL_COLUMNS)} FROM calls WHERE created_at BETWEEN ? AND ? "
                                      "ORDER BY id", (frm, to))
+    elif kind in ("audit", "audit_log", "tb_audit"):
+        import pg_store
+        cols = pg_store.AUDIT_PG_COLUMNS
+        rows = pg_store.audit_rows_pg(params.get("from") or "", params.get("to") or "",
+                                      params.get("ticket_id") or "")
     elif kind in ("evidence", "audit_evidence"):
         cols = [
             "ticket_id", "alert_id", "assignment_id", "site_number", "site_name", "severity",
@@ -216,7 +221,7 @@ def export(params):
             wa_rows = []
         rows = list(call_rows) + list(wa_rows)
     else:
-        raise ValueError("type must be calls, events, timeline or evidence")
+        raise ValueError("type must be audit, calls, events, timeline or evidence")
     stamp = (params.get("from") or "all")[:10]
     if (params.get("format") or "csv").lower() == "json":
         return "application/json; charset=utf-8", json.dumps(rows, indent=2, ensure_ascii=False), \

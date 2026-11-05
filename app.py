@@ -1030,12 +1030,13 @@ def dashboard_html():
           </div>
           <div class="card-footer">
             <span>Event Timestamp: <b>{time_str}</b></span>
-            <span>Last Event ID: <b>{safe_esc(v.get('last_event_id') or '-')}</b></span>
             <span>Task Status: <b>{safe_esc(v.get('status') or 'Active')}</b></span>
           </div>
         </div>"""
 
-    ack_rate = f"{int((ack_count / total_tickets) * 100)}%" if total_tickets > 0 else "0%"
+    open_tickets = max(total_tickets - closed_count, 0)
+    ack_rate = f"{int((ack_count / open_tickets) * 100)}%" if open_tickets > 0 else "0%"
+    wa_whatsapp, wa_sms = pg.get("wa_whatsapp", 0), pg.get("wa_sms", wa_total)
     mode = "DRY RUN (Simulator)" if CFG["dry_run"] else f"LIVE GATEWAY - {safe_esc(CFG.get('base_url') or 'Connected')}"
     dash_stats_json = json.dumps({
         "status": [assigned_count, reassigned_count, pending_count, escalated_count, ack_count],
@@ -1155,8 +1156,15 @@ def dashboard_html():
       gap: 14px;
       margin-bottom: 24px;
     }}
-    @media (max-width: 1500px) {{
+    @media (max-width: 1899px) {{
+      .metrics-grid {{ grid-template-columns: repeat(20, minmax(0, 1fr)); }}
+      .metrics-grid .metric-card {{ grid-column: span 4; }}
+      .metrics-grid .metric-card:nth-child(n+6) {{ grid-column: span 5; }}
+    }}
+    @media (max-width: 1099px) {{
       .metrics-grid {{ grid-template-columns: repeat(3, minmax(0, 1fr)); }}
+      .metrics-grid .metric-card,
+      .metrics-grid .metric-card:nth-child(n+6) {{ grid-column: auto; }}
     }}
     @media (max-width: 800px) {{
       .metrics-grid {{ grid-template-columns: repeat(2, minmax(0, 1fr)); }}
@@ -1236,7 +1244,33 @@ def dashboard_html():
       color: var(--text);
       font-feature-settings: "tnum";
     }}
+    .log-menu {{ position: relative; display: inline-block; }}
+    .log-menu-list {{
+      display: none;
+      position: absolute;
+      right: 0;
+      top: calc(100% + 6px);
+      min-width: 220px;
+      background: #ffffff;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      box-shadow: 0 8px 20px rgba(15,23,42,0.12);
+      padding: 4px;
+      z-index: 50;
+    }}
+    .log-menu-list.open {{ display: block; }}
+    .log-menu-list a {{
+      display: block;
+      padding: 8px 12px;
+      font-size: 12px;
+      font-weight: 500;
+      color: #0f172a;
+      text-decoration: none;
+      border-radius: 6px;
+    }}
+    .log-menu-list a:hover {{ background: #f1f5f9; color: #0969da; }}
     .metric-badge {{
+      white-space: nowrap;
       font-size: 11px;
       padding: 3px 9px;
       border-radius: 999px;
@@ -2312,7 +2346,7 @@ def dashboard_html():
         </div>
         <div class="metric-value-row">
           <div class="metric-number" id="metric-total">{total_tickets}</div>
-          <span class="metric-badge badge-blue">All</span>
+          <span class="metric-badge badge-blue" id="badge-total">{closed_count} Closed</span>
         </div>
       </div>
 
@@ -2367,7 +2401,7 @@ def dashboard_html():
         </div>
         <div class="metric-value-row">
           <div class="metric-number" id="metric-ack">{ack_count}</div>
-          <span class="metric-badge badge-green">{ack_rate} Rate</span>
+          <span class="metric-badge badge-green" id="badge-ack" title="Acknowledged tickets as a share of open tickets (closed tickets excluded)">{ack_rate} Rate</span>
         </div>
       </div>
 
@@ -2389,7 +2423,7 @@ def dashboard_html():
         </div>
         <div class="metric-value-row">
           <div class="metric-number" id="metric-wa-total">{wa_total}</div>
-          <span class="metric-badge badge-purple">{wa_delivered} Deliv</span>
+          <span class="metric-badge badge-purple" id="badge-msgs" title="Messages sent by SMS and WhatsApp">{wa_sms} SMS &middot; {wa_whatsapp} WA</span>
         </div>
       </div>
 
@@ -2585,6 +2619,18 @@ def dashboard_html():
           <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
           Export CSV
         </button>
+        <div class="log-menu" id="logMenu">
+          <button type="button" class="ctl-btn" onclick="toggleLogMenu(event)" title="Download audit logs and the server log">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line></svg>
+            Logs &#9662;
+          </button>
+          <div class="log-menu-list" id="logMenuList">
+            <a href="/api/audit/export?type=audit&format=csv" download>Audit Log (CSV)</a>
+            <a href="/api/audit/export?type=timeline&format=csv" download>Workflow Activity (CSV)</a>
+            <a href="/api/audit/export?type=calls&format=csv" download>Voice Calls (CSV)</a>
+            <a href="/api/logs/download" download>Server Log File (.log)</a>
+          </div>
+        </div>
       </div>
     </div>
 
@@ -2991,6 +3037,16 @@ def dashboard_html():
         console.error('runFilter error:', err);
       }}
     }}
+
+    function toggleLogMenu(e) {{
+      if (e) e.stopPropagation();
+      var m = document.getElementById('logMenuList');
+      if (m) m.classList.toggle('open');
+    }}
+    document.addEventListener('click', function() {{
+      var m = document.getElementById('logMenuList');
+      if (m) m.classList.remove('open');
+    }});
 
     function exportFilteredCsv() {{
       try {{
@@ -3600,6 +3656,10 @@ def dashboard_html():
           updateNum('metric-unresolved', s.unresolved_count);
           updateNum('metric-wa-total', s.wa_total);
           updateNum('metric-calls-failed', s.calls_failed);
+          var setText = function(id, txt) {{ var b = document.getElementById(id); if (b) b.innerText = txt; }};
+          setText('badge-total', s.closed_count + ' Closed');
+          setText('badge-ack', s.ack_rate + ' Rate');
+          setText('badge-msgs', s.wa_sms + ' SMS \u00b7 ' + s.wa_whatsapp + ' WA');
 
           // Update pill buttons text
           var updateTab = function(id, name, val) {{
@@ -3902,6 +3962,9 @@ class Handler(BaseHTTPRequestHandler):
         if path in ("/api/health", "/health", "/api/authenticate", "/authenticate", "/api/auth", "/api/login",
                     "/api/authorize", "/api/authorization", "/api/verify", "/docs", "/api/docs", "/documentation", "/login", "/logout") or path.startswith("/static/"):
             return True
+        if path in ("/api/dashboard/stats", "/api/dashboard/data", "/api/audit/export",
+                    "/api/logs/download", "/api/logs") and self._get_cookie_session():
+            return True
         if path.startswith("/api/"):
             sent_key = self._extract_token(form)
             if CFG["api_key"] and sent_key == CFG["api_key"]:
@@ -4159,6 +4222,10 @@ class Handler(BaseHTTPRequestHandler):
                         "unresolved_count": n_esc,
                         "wa_total": pg["wa_total"],
                         "wa_delivered": pg["wa_delivered"],
+                        "wa_whatsapp": pg.get("wa_whatsapp", 0),
+                        "wa_sms": pg.get("wa_sms", pg["wa_total"]),
+                        "closed_count": n_closed,
+                        "ack_rate": (f"{int(n_ack / (n_total - n_closed) * 100)}%" if (n_total - n_closed) > 0 else "0%"),
                         "calls_total": pg["calls_total"],
                         "calls_completed": pg["calls_completed"],
                         "calls_failed": pg["calls_failed"],
