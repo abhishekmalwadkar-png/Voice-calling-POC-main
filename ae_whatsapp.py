@@ -17,10 +17,10 @@ def _format_date(dt_str=None):
     try:
         if dt_str:
             d = datetime.fromisoformat(str(dt_str).replace("Z", "+00:00"))
-            return d.strftime("%d-%b-%Y")
+            return d.strftime("%d-%b-%Y %I:%M %p")
     except Exception:
         pass
-    return datetime.now().strftime("%d-%b-%Y")
+    return datetime.now().strftime("%d-%b-%Y %I:%M %p")
 
 
 def send_whatsapp_template(phone_number, template_name, parameters, lang_code="en", timeout=15):

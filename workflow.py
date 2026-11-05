@@ -586,9 +586,9 @@ def send_sms_alert(t, role, rec, call_cid=None, alert_type_override=None, custom
 
     # Format escalation date as DD-Mon-YYYY (e.g. 04-Nov-2026)
     try:
-        esc_date = datetime.now().strftime("%d-%b-%Y")
+        esc_date = datetime.now().strftime("%d-%b-%Y %I:%M %p")
     except Exception:
-        esc_date = now_iso()[:10]
+        esc_date = now_iso()[:16].replace(chr(84), chr(32))
 
     if reason == "rejected":
         sms_body = (
@@ -768,9 +768,9 @@ def send_sms_closure(t, role, rec, resolution=None, closed_at=None, delay_sec=No
     res = str(resolution or "Emergency issue resolved and service restored.").replace('\n', ' ').strip()
     close_time = closed_at or now_iso()
     try:
-        close_date = datetime.now().strftime("%d-%b-%Y")
+        close_date = datetime.now().strftime("%d-%b-%Y %I:%M %p")
     except Exception:
-        close_date = close_time[:10]
+        close_date = close_time[:16].replace(chr(84), chr(32))
     site_disp = t.get('site_name') or t.get('site_number') or 'N/A'
     sms_body = (
         f"Ticket Closure Notice\n\n"
