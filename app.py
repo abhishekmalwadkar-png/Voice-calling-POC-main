@@ -2625,10 +2625,10 @@ def dashboard_html():
             Logs &#9662;
           </button>
           <div class="log-menu-list" id="logMenuList">
-            <a href="/api/audit/export?type=audit&format=csv" download>Audit Log (CSV)</a>
-            <a href="/api/audit/export?type=timeline&format=csv" download>Workflow Activity (CSV)</a>
-            <a href="/api/audit/export?type=calls&format=csv" download>Voice Calls (CSV)</a>
-            <a href="/api/logs/download" download>Server Log File (.log)</a>
+            <a href="/api/audit/export?type=audit&format=log" download>Audit Log (.log)</a>
+            <a href="/api/audit/export?type=timeline&format=log" download>Workflow Activity (.log)</a>
+            <a href="/api/audit/export?type=calls&format=log" download>Voice Calls (.log)</a>
+            <a href="/api/logs/download" download>Server Log (.log)</a>
           </div>
         </div>
       </div>

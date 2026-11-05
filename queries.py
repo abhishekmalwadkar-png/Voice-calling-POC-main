@@ -168,6 +168,30 @@ def events(params):
     return q(sql + " ORDER BY received_at DESC LIMIT ?", (*args, _limit(params)))
 
 
+def _log_line(kind, r):
+    """One readable text line per row, for the .log downloads."""
+    def g(key):
+        v = r.get(key)
+        return "-" if v in (None, "") else str(v).replace("\r", " ").replace("\n", " ")
+
+    if kind in ("audit", "audit_log", "tb_audit"):
+        line = f"[{g('created_at')}] {g('ticket_id')} | {g('activity_type')} | {g('activity_status')} | {g('activity_description')}"
+        extra = [f"{k}={r[k]}" for k in ("assignment_id", "workflow_id", "reference_id", "event_id") if r.get(k)]
+        return line + (" | " + " ".join(extra) if extra else "")
+    if kind == "timeline":
+        extra = [f"{k}={r[k]}" for k in ("call_id", "event_id") if r.get(k)]
+        line = f"[{g('ts')}] {g('ticket_id')} | {g('kind')} | {g('message')}"
+        return line + (" | " + " ".join(extra) if extra else "")
+    if kind == "events":
+        return (f"[{g('received_at')}] {g('ticket_id')} | {g('event_type')} | {g('result')} | {g('note')} "
+                f"| event_id={g('event_id')} version={g('version')}")
+    if kind == "calls":
+        return (f"[{g('created_at')}] {g('ticket_id')} | {g('role')} call #{g('attempt_no')} to {g('to_number')} | "
+                f"status={g('status')} outcome={g('outcome')} key={g('dtmf')} duration={g('duration_sec')}s | "
+                f"assignment={g('assignment_id')} sid={g('call_sid')}")
+    return " | ".join(f"{k}={g(k)}" for k in r)
+
+
 def export(params):
     """GET /api/audit/export?type=calls|events|timeline&format=csv|json&from=&to=  -> (content_type, body, filename)"""
     kind = (params.get("type") or "calls").lower()
@@ -223,6 +247,9 @@ def export(params):
     else:
         raise ValueError("type must be audit, calls, events, timeline or evidence")
     stamp = (params.get("from") or "all")[:10]
+    if (params.get("format") or "csv").lower() == "log":
+        text = "\n".join(_log_line(kind, r) for r in rows)
+        return "text/plain; charset=utf-8", text + ("\n" if text else ""), f"flm_{kind}_{stamp}.log"
     if (params.get("format") or "csv").lower() == "json":
         return "application/json; charset=utf-8", json.dumps(rows, indent=2, ensure_ascii=False), \
             f"flm_{kind}_{stamp}.json"
