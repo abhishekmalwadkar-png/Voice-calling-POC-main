@@ -191,6 +191,7 @@ def init_db():
         read_at timestamp with time zone,
         failure_reason text
     );
+    ALTER TABLE public.tb_whatsapp_messages ADD COLUMN IF NOT EXISTS channel character varying(10) DEFAULT 'sms';
     """
     try:
         with conn.cursor() as cur:
@@ -465,9 +466,9 @@ def save_whatsapp_message_pg(msg_dict):
                     workflow_id, ticket_id, assignment_id, recipient_role,
                     recipient_id, recipient_name, mobile_number, message_type,
                     provider_message_id, template_name, template_version,
-                    delivery_status, submitted_at, sent_at, failure_reason
+                    delivery_status, submitted_at, sent_at, failure_reason, channel
                 ) VALUES (
-                    %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s
+                    %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s
                 )
             """, (
                 msg_dict.get("workflow_id"),
@@ -484,7 +485,8 @@ def save_whatsapp_message_pg(msg_dict):
                 msg_dict.get("delivery_status", "sent"),
                 msg_dict.get("submitted_at"),
                 msg_dict.get("sent_at"),
-                msg_dict.get("failure_reason")
+                msg_dict.get("failure_reason"),
+                msg_dict.get("channel") or "sms"
             ))
         conn.commit()
         return True
@@ -894,6 +896,7 @@ def dashboard_data(limit=1000):
             "whatsapp_messages": [
                 {"recipient_role": w.get("recipient_role"), "recipient_name": w.get("recipient_name"),
                  "mobile_number": w.get("mobile_number"), "template_name": w.get("template_name"),
+                 "channel": w.get("channel") or "sms",
                  "delivery_status": w.get("delivery_status"), "provider_message_id": w.get("provider_message_id"),
                  "sent_at": _iso(w.get("sent_at")), "submitted_at": _iso(w.get("submitted_at"))}
                 for w in wa if w["ticket_id"] == tid]})

@@ -750,6 +750,11 @@ def dashboard_html():
                 w_stat = safe_esc(w.get("delivery_status") or "sent")
                 w_time = safe_esc(w.get("sent_at") or w.get("submitted_at") or "-")
                 w_mid = safe_esc(w.get("provider_message_id") or "")
+                w_is_wa = (str(w.get("channel") or "").lower() == "whatsapp"
+                           or "whatsapp" in str(w.get("message_type") or "").lower()
+                           or str(w.get("template_name") or "").lower().startswith("shabakkat_"))
+                w_chan = "WhatsApp" if w_is_wa else "SMS"
+                w_badge_style = "background:#dcfce7;color:#166534;" if w_is_wa else "background:#e0e7ff;color:#3730a3;"
 
                 if w_mid:
                     all_wamids.append(w_mid)
@@ -761,7 +766,7 @@ def dashboard_html():
                 wa_html += f"""
                 <div class="wa-row">
                   <div class="call-role">
-                    <span class="wa-badge" style="background:#e0e7ff;color:#3730a3;">SMS: {w_role}</span>
+                    <span class="wa-badge" style="{w_badge_style}">{w_chan}: {w_role}</span>
                     <span class="phone-number">{safe_esc(w.get('mobile_number') or '')}</span>
                     {wamid_pill}
                   </div>
