@@ -814,6 +814,60 @@ def _person(details, language=None):
             "language": pick("language", "preferred_language", "preferred_lang") or language or ""}
 
 
+_REJECT_REASONS = {"1": "Busy on another site", "2": "On leave / Off duty",
+                   "3": "Equipment or transport issue", "4": "Other / Personal reasons"}
+_ACTIVE_CALL_STATUSES = {"queued", "initiating", "initiated", "ringing", "in-progress"}
+_ROLE_NAMES = (("technician", "Technician"), ("team_leader", "Team leader"), ("manager", "Manager"))
+
+
+def _call_result_text(c):
+    """One short phrase for what happened on a call, from the saved call row."""
+    dtmf = str(c.get("dtmf") or "")
+    status = str(c.get("status") or "").lower()
+    if c.get("response") == "acknowledged":
+        text = "acknowledged"
+    elif "reason:" in dtmf:
+        digit = dtmf.split("reason:", 1)[1][:1]
+        text = "rejected (" + _REJECT_REASONS.get(digit, "Other / unspecified") + ")"
+    elif status in ("no-answer", "no_answer"):
+        text = "no answer"
+    elif status == "busy":
+        text = "busy"
+    elif status in ("failed", "canceled"):
+        text = status
+    elif status == "completed":
+        text = "answered, no key pressed"
+    else:
+        text = "in progress"
+    if c.get("superseded") and text in ("in progress", "answered, no key pressed"):
+        text = "ended, task reassigned"
+    return text
+
+
+def _ticket_summary(t_calls, wa_rows, recipients):
+    """Plain-text summary shown on a task card: call results per person, alerts sent, reassignment."""
+    parts = []
+    for role, name in _ROLE_NAMES:
+        mine = [c for c in t_calls if c.get("role") == role]
+        if mine:
+            parts.append(f"{name}: " + "; ".join(
+                f"call {c.get('attempt_no') or 1} {_call_result_text(c)}" for c in mine) + ".")
+    sent = {}
+    for w in wa_rows:
+        chan = "WhatsApp" if str(w.get("channel") or "").lower() == "whatsapp" else "SMS"
+        role = str(w.get("recipient_role") or "").lower()
+        label = dict(_ROLE_NAMES).get(role, role.replace("_", " ").title() or "Recipient")
+        if label not in sent.setdefault(chan, []):
+            sent[chan].append(label)
+    if sent:
+        parts.append("Alerts: " + "; ".join(f"{chan} to {', '.join(who)}" for chan, who in sent.items()) + ".")
+    prev = (recipients or {}).get("previous_technician") or {}
+    cur = (recipients or {}).get("technician") or {}
+    if prev.get("name"):
+        parts.append(f"Reassigned from {prev['name']}" + (f" to {cur['name']}" if cur.get("name") else "") + ".")
+    return " ".join(parts)
+
+
 def dashboard_data(limit=1000):
     """Everything the dashboard shows, read from the PostgreSQL tb_* tables only .
 
@@ -922,6 +976,9 @@ def dashboard_data(limit=1000):
             state = ""
         for c in t_calls:
             c.pop("_ack", None)
+        # A call is "active" only while it is still ringing or connected (not just because it exists).
+        call_active = any(not c["superseded"] and not c.get("ended_at")
+                          and str(c.get("status") or "").lower() in _ACTIVE_CALL_STATUSES for c in t_calls)
         views.append({
             "ticket_id": tid, "alert_id": t.get("alert_id"), "alarm_id": t.get("alarm_id"), "assignment_id": cur_aid,
             "site_number": t.get("site_number"), "site_name": t.get("site_name"), "severity": t.get("severity"),
@@ -930,7 +987,9 @@ def dashboard_data(limit=1000):
             "created_at": _iso(t.get("opened_at")),
             "last_event_time": _iso(t.get("last_event_at") or t.get("updated_at")),
             "last_event_id": None, "recipients": recipients, "calls": t_calls, "acknowledged": acked,
-            "call_workflow": {"state": state, "acknowledged": acked, "response_summary": ""},
+            "call_active": call_active,
+            "call_workflow": {"state": state, "acknowledged": acked,
+                              "response_summary": _ticket_summary(t_calls, [w for w in wa if w["ticket_id"] == tid], recipients)},
             "followup": {},
             "whatsapp_messages": [
                 {"recipient_role": w.get("recipient_role"), "recipient_name": w.get("recipient_name"),

@@ -592,6 +592,7 @@ def dashboard_html():
     major_count = 0
     minor_count = 0
     unresolved_count = 0
+    closed_count = 0
 
     wa_total, wa_delivered = pg["wa_total"], pg["wa_delivered"]
     calls_total, calls_completed, calls_failed = pg["calls_total"], pg["calls_completed"], pg["calls_failed"]
@@ -626,7 +627,16 @@ def dashboard_html():
             prev_lang = prev_tech.get("language") or "English"
             prev_aid = prev_tech.get("assignment_id") or f"{v.get('ticket_id')}-ASN1"
 
-        if is_ack:
+        # A call counts as "dialing" only while it is still ringing or connected.
+        call_active = bool(v.get("call_active")) if "call_active" in v else bool(v.get("calls"))
+
+        if task_status_raw.lower() in ("closed", "resolved"):
+            closed_count += 1
+            filter_cat = "closed"
+            cls = "status-closed"
+            status_text = "CLOSED"
+            is_unresolved = False
+        elif is_ack:
             ack_count += 1
             filter_cat = "ack"
             cls = "status-ack"
@@ -645,11 +655,17 @@ def dashboard_html():
             cls = "status-escalated"
             status_text = "ESCALATED"
             is_unresolved = True
-        elif "CALL" in state or "PENDING" in state or (v.get("calls") and not is_ack):
+        elif call_active:
             pending_count += 1
             filter_cat = "pending"
             cls = "status-calling"
             status_text = "PENDING / DIALING"
+            is_unresolved = False
+        elif v.get("calls"):
+            assigned_count += 1
+            filter_cat = "assigned"
+            cls = "status-assigned"
+            status_text = "NO RESPONSE"
             is_unresolved = False
         else:
             assigned_count += 1
@@ -983,16 +999,12 @@ def dashboard_html():
               <button type="button" class="btn-view-details" onclick="openTaskDetails(this)" data-task="{task_json_str}" title="View complete task assignment, reassignment, and technician details">
                 View Details
               </button>
-              <button type="button" class="btn-inspect" onclick="openTimeline('{safe_esc(v.get('ticket_id'))}')" title="Inspect complete chronological communication timeline">
-                Inspect Timeline
-              </button>
             </div>
           </div>
           <div class="card-body">
             {tech_html}
             <div class="card-summary">
               <div><span class="summary-label">Summary:</span> {safe_esc(cw.get('response_summary') or 'No call response yet.')}</div>
-              <div class="followup-info">Follow-up: <b>{safe_esc(v.get('followup', {}).get('state') or 'None')}</b></div>
             </div>
             <details class="events-dropdown">
               <summary class="events-dropdown-summary">
@@ -1563,6 +1575,8 @@ def dashboard_html():
     .status-assigned .status-dot {{ background: #94a3b8; }}
     .status-reassigned {{ background: #faf5ff; color: #7e22ce; border: 1px solid #e9d5ff; }}
     .status-reassigned .status-dot {{ background: #a855f7; }}
+    .status-closed {{ background: #f1f5f9; color: #334155; border: 1px solid #cbd5e1; }}
+    .status-closed .status-dot {{ background: #64748b; }}
     .mono-val {{ font-family: 'JetBrains Mono', monospace; font-size: 11px; }}
 
     .tech-details-section {{
@@ -4104,12 +4118,25 @@ class Handler(BaseHTTPRequestHandler):
                     pg = {"tickets": [], "wa_total": 0, "wa_delivered": 0, "calls_total": 0, "calls_completed": 0, "calls_failed": 0}
                 t_list = pg["tickets"]
                 n_total = len(t_list)
-                n_ack = sum(1 for t in t_list if t.get("acknowledged"))
-                n_reassign = sum(1 for t in t_list if not t.get("acknowledged") and (str(t.get("status") or "").lower() in ("reassigned", "assignment_reassigned") or bool((t.get("recipients") or {}).get("previous_technician"))))
-                n_esc = sum(1 for t in t_list if not t.get("acknowledged") and ("ESCALAT" in (t.get("call_workflow") or {}).get("state", "").upper() or "MANAGER" in (t.get("call_workflow") or {}).get("state", "").upper() or "LEADER" in (t.get("call_workflow") or {}).get("state", "").upper()))
-                n_pending = sum(1 for t in t_list if not t.get("acknowledged") and ("CALL" in (t.get("call_workflow") or {}).get("state", "").upper() or "PENDING" in (t.get("call_workflow") or {}).get("state", "").upper() or bool(t.get("calls"))))
-                n_assigned = max(0, n_total - n_ack - n_reassign - n_esc - n_pending)
-                
+                # One pass, same precedence as the task cards: closed > acknowledged > reassigned > escalated > pending > assigned
+                n_ack = n_reassign = n_esc = n_pending = n_assigned = n_closed = 0
+                for t in t_list:
+                    st = str((t.get("call_workflow") or {}).get("state") or "").upper()
+                    if str(t.get("status") or "").strip().lower() in ("closed", "resolved"):
+                        n_closed += 1
+                    elif t.get("acknowledged"):
+                        n_ack += 1
+                    elif (str(t.get("status") or "").lower() in ("reassigned", "assignment_reassigned")
+                          or st == "CANCELLED_REASSIGNED"
+                          or bool((t.get("recipients") or {}).get("previous_technician"))):
+                        n_reassign += 1
+                    elif "ESCALAT" in st or "MANAGER" in st or "LEADER" in st:
+                        n_esc += 1
+                    elif (t.get("call_active") if "call_active" in t else bool(t.get("calls"))):
+                        n_pending += 1
+                    else:
+                        n_assigned += 1
+
                 n_emg = sum(1 for t in t_list if str(t.get("severity") or "").lower() == "emergency" or str(t.get("ticket_id") or "").upper().startswith("EMG"))
                 n_crit = sum(1 for t in t_list if str(t.get("severity") or "").lower() == "critical")
                 n_maj = sum(1 for t in t_list if str(t.get("severity") or "").lower() == "major")
