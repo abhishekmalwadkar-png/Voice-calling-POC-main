@@ -120,6 +120,13 @@ def _reload_modules():
     """Hot-reload modified modules into memory without restarting the server or tunnel."""
     config.load_env(override=True)
     import pg_store
+    # Reloading store / pg_store resets their pool variables; close the old pools first so their
+    # connections are not left open on the database server ("too many clients already").
+    for closer in (store.close_pool, pg_store.close_pool):
+        try:
+            closer()
+        except Exception as e:
+            print(f"[{store.now_iso()}] - reload: could not close a pool: {e}", flush=True)
     modules = [store, config, texts, ae_whatsapp, queries, workflow, pg_store]
     reloaded = []
     for mod in modules:
@@ -1008,9 +1015,6 @@ def dashboard_html():
           </div>
           <div class="card-body">
             {tech_html}
-            <div class="card-summary">
-              <div><span class="summary-label">Summary:</span> {safe_esc(cw.get('response_summary') or 'No call response yet.')}</div>
-            </div>
             <details class="events-dropdown">
               <summary class="events-dropdown-summary">
                 <div class="events-summary-left">
@@ -1034,6 +1038,8 @@ def dashboard_html():
           </div>
         </div>"""
 
+    # Reassigned card/tab/chart = tb_assignments rows with assignment_status 'Replaced'
+    reassigned_count = pg.get("reassigned_total", reassigned_count)
     open_tickets = max(total_tickets - closed_count, 0)
     ack_rate = f"{int((ack_count / open_tickets) * 100)}%" if open_tickets > 0 else "0%"
     wa_whatsapp, wa_sms = pg.get("wa_whatsapp", 0), pg.get("wa_sms", wa_total)
@@ -4215,7 +4221,7 @@ class Handler(BaseHTTPRequestHandler):
                     "stats": {
                         "total_tickets": n_total,
                         "assigned_count": n_assigned,
-                        "reassigned_count": n_reassign,
+                        "reassigned_count": pg.get("reassigned_total", n_reassign),
                         "pending_count": n_pending,
                         "escalated_count": n_esc,
                         "ack_count": n_ack,

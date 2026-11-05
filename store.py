@@ -153,10 +153,23 @@ def connect(schema=None):
         finally:
             boot.close()
         _schema = name
-        _pool = _pgpool.ThreadedConnectionPool(1, 20, options=f'-c search_path="{name}",public', **kw)
+        _pool = _pgpool.ThreadedConnectionPool(1, 12, options=f'-c search_path="{name}",public',
+                                               application_name="flm-workflow", **kw)
         if (q("SELECT COUNT(*) AS n FROM users", one=True) or {}).get("n", 0) == 0:
             create_user(CFG.get("auth_username") or "admin", CFG.get("auth_password") or "admin123",
                         role="admin", full_name="Administrator")
+
+
+def close_pool():
+    """Close every pooled connection (used before a hot reload so the old pool does not stay open)."""
+    global _pool
+    with DB_LOCK:
+        if _pool:
+            try:
+                _pool.closeall()
+            except Exception:
+                pass
+            _pool = None
 
 
 def drop_schema(schema):
@@ -211,12 +224,24 @@ def _adapt(args):
     return tuple(int(a) if isinstance(a, bool) else a for a in args)
 
 
+def _get_conn():
+    """A pooled connection; when all are busy, wait briefly for one instead of failing at once."""
+    for _ in range(500):
+        try:
+            return _pool.getconn()
+        except _pgpool.PoolError:
+            time.sleep(0.02)
+    raise RuntimeError("workflow database pool exhausted (all connections busy for 10 s)")
+
+
 def q(sql, args=(), one=False):
     """Run one statement. INSERT returns the new row id, UPDATE/DELETE the affected row count."""
     if _pool is None:
-        connect()
+        with DB_LOCK:                 # many threads can arrive together (e.g. right after a reload): open the pool once
+            if _pool is None:
+                connect()
     text, returns_id = _translate(sql)
-    conn = _pool.getconn()
+    conn = _get_conn()
     broken = False
     try:
         conn.autocommit = True

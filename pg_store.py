@@ -7,6 +7,7 @@ directly into the PostgreSQL production schema defined in FLMHelpdesk (1).sql.
 import json
 import logging
 import threading
+import time
 from datetime import datetime, timezone
 
 from config import CFG
@@ -44,30 +45,57 @@ def get_connection():
     try:
         with _pool_lock:
             if _pg_pool is None or _pg_pool.closed:
-                _pg_pool = psycopg2.pool.SimpleConnectionPool(
+                # ThreadedConnectionPool: this pool is used from many threads (HTTP server, WhatsApp sender, dashboard).
+                _pg_pool = psycopg2.pool.ThreadedConnectionPool(
                     minconn=1,
-                    maxconn=10,
+                    maxconn=8,
                     host=host,
                     port=port,
                     dbname=dbname,
                     user=user,
                     password=password,
-                    connect_timeout=5
+                    connect_timeout=5,
+                    application_name="flm-dashboard"
                 )
-        return _pg_pool.getconn()
+        # The pool raises at once when all connections are busy; wait briefly for one to be returned.
+        for _ in range(500):
+            try:
+                return _pg_pool.getconn()
+            except psycopg2.pool.PoolError:
+                time.sleep(0.02)
+        raise RuntimeError("connection pool exhausted (all connections busy for 10 s)")
     except Exception as e:
         logger.warning(f"Failed to connect to PostgreSQL ({dbname}@{host}:{port}): {e}")
         return None
 
 
 def release_connection(conn):
-    """Return connection back to pool."""
+    """Return connection back to pool. A connection that cannot go back is closed, never leaked."""
     global _pg_pool
-    if conn and _pg_pool and not _pg_pool.closed:
+    if not conn:
+        return
+    if _pg_pool and not _pg_pool.closed:
         try:
             _pg_pool.putconn(conn)
+            return
         except Exception:
             pass
+    try:
+        conn.close()
+    except Exception:
+        pass
+
+
+def close_pool():
+    """Close every pooled connection (used before a hot reload so the old pool does not stay open)."""
+    global _pg_pool
+    with _pool_lock:
+        if _pg_pool is not None and not _pg_pool.closed:
+            try:
+                _pg_pool.closeall()
+            except Exception:
+                pass
+        _pg_pool = None
 
 
 def init_db():
@@ -984,6 +1012,9 @@ def dashboard_data(limit=1000):
                         "WHERE LOWER(COALESCE(message_type,'')) LIKE '%whatsapp%' "
                         "OR LOWER(COALESCE(template_name,'')) LIKE 'shabakkat%'")
             wa_whatsapp = cur.fetchone()["n"]
+            # Reassigned Tasks card = assignments that were replaced by a new technician
+            cur.execute("SELECT COUNT(*) AS n FROM public.tb_assignments WHERE LOWER(assignment_status) = 'replaced'")
+            reassigned_total = cur.fetchone()["n"]
             cur.execute("SELECT COUNT(*) AS n FROM public.tb_voice_calls")
             calls_total = cur.fetchone()["n"]
             cur.execute("SELECT COUNT(*) AS n FROM public.tb_voice_calls WHERE LOWER(call_status)='completed'")
@@ -1100,4 +1131,5 @@ def dashboard_data(limit=1000):
                 for w in wa if w["ticket_id"] == tid]})
     return {"tickets": views, "wa_total": wa_total, "wa_delivered": wa_delivered,
             "wa_whatsapp": wa_whatsapp, "wa_sms": max(wa_total - wa_whatsapp, 0), "calls_total": calls_total,
-            "calls_completed": calls_completed, "calls_failed": calls_failed}
+            "calls_completed": calls_completed, "calls_failed": calls_failed,
+            "reassigned_total": reassigned_total}
