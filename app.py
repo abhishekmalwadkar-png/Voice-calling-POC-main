@@ -694,7 +694,15 @@ def dashboard_html():
             c_status = safe_esc(c.get("status") or "unknown")
             c_lang_raw = c.get("language")
             c_lang = safe_esc(full_lang_name(c_lang_raw) if c_lang_raw and c_lang_raw != "-" else "-")
-            c_dtmf = safe_esc(str(c.get("dtmf") or "-"))
+            c_dtmf_raw = str(c.get("dtmf") or "")
+            c_dtmf = safe_esc(c_dtmf_raw or "-")
+            c_reason_txt = c.get("reject_reason")
+            if not c_reason_txt:
+                _m = re.search(r"reason:(\d*)", c_dtmf_raw)
+                if _m:
+                    c_reason_txt = workflow.REJECT_REASONS.get(_m.group(1), "Other / unspecified")
+            c_reason_tag = (f'<span class="meta-tag">Reason: <b>{safe_esc(c_reason_txt)}</b></span>'
+                            if c_reason_txt else "")
             c_resp = safe_esc(c.get("response") or "-")
             c_phone = safe_esc(c.get("to_number") or "")
             c_sid = safe_esc(c.get("call_sid") or "")
@@ -724,6 +732,7 @@ def dashboard_html():
                 <span class="meta-tag">Status: <b>{c_status}</b></span>
                 <span class="meta-tag">Lang: <b>{c_lang}</b></span>
                 <span class="meta-tag">Key: <b>{c_dtmf}</b></span>
+                {c_reason_tag}
                 <span class="meta-tag response-tag">Resp: <b>{c_resp}</b></span>
                 {superseded}
               </div>
