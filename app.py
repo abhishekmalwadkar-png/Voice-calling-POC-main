@@ -1129,47 +1129,96 @@ def dashboard_html():
     /* Metrics Grid */
     .metrics-grid {{
       display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+      grid-template-columns: repeat(9, minmax(0, 1fr));
       gap: 14px;
       margin-bottom: 24px;
     }}
+    @media (max-width: 1500px) {{
+      .metrics-grid {{ grid-template-columns: repeat(3, minmax(0, 1fr)); }}
+    }}
+    @media (max-width: 800px) {{
+      .metrics-grid {{ grid-template-columns: repeat(2, minmax(0, 1fr)); }}
+      .metrics-grid .metric-card:last-child {{ grid-column: 1 / -1; }}
+    }}
     .metric-card {{
+      --mc: #2563eb;
+      --mt: #eff6ff;
+      position: relative;
       background: var(--card-bg);
       border: 1px solid var(--border);
-      border-radius: 10px;
-      padding: 14px 16px;
-      box-shadow: 0 1px 3px rgba(0,0,0,0.03);
+      border-radius: 12px;
+      padding: 16px 16px 14px 18px;
+      box-shadow: 0 1px 2px rgba(15,23,42,0.04);
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      overflow: hidden;
       transition: transform 0.15s ease, box-shadow 0.15s ease;
       cursor: pointer;
     }}
+    .metric-card::before {{
+      content: "";
+      position: absolute;
+      left: 0; top: 0; bottom: 0;
+      width: 4px;
+      background: var(--mc);
+    }}
     .metric-card:hover {{
       transform: translateY(-2px);
-      box-shadow: 0 4px 12px rgba(0,0,0,0.06);
+      box-shadow: 0 8px 20px rgba(15,23,42,0.08);
     }}
+    .mc-blue {{ --mc: #2563eb; --mt: #eff6ff; }}
+    .mc-cyan {{ --mc: #0891b2; --mt: #ecfeff; }}
+    .mc-purple {{ --mc: #7c3aed; --mt: #f5f3ff; }}
+    .mc-amber {{ --mc: #d97706; --mt: #fffbeb; }}
+    .mc-red {{ --mc: #dc2626; --mt: #fef2f2; }}
+    .mc-green {{ --mc: #059669; --mt: #ecfdf5; }}
+    .mc-slate {{ --mc: #475569; --mt: #f1f5f9; }}
+    .metric-top {{
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 8px;
+    }}
+    .metric-ic {{
+      flex: none;
+      width: 30px;
+      height: 30px;
+      border-radius: 8px;
+      background: var(--mt);
+      color: var(--mc);
+      display: grid;
+      place-items: center;
+    }}
+    .metric-ic svg {{ width: 16px; height: 16px; }}
     .metric-label {{
       font-size: 11px;
-      font-weight: 600;
+      font-weight: 700;
       text-transform: uppercase;
-      letter-spacing: 0.04em;
+      letter-spacing: 0.06em;
       color: var(--text-muted);
-      margin-bottom: 6px;
+      line-height: 1.35;
+      min-height: 30px;
     }}
     .metric-value-row {{
       display: flex;
-      align-items: baseline;
-      justify-content: space-between;
+      flex-direction: column;
+      align-items: flex-start;
+      gap: 10px;
     }}
     .metric-number {{
-      font-size: 22px;
+      font-size: 30px;
       font-weight: 800;
+      letter-spacing: -0.02em;
+      line-height: 1;
       color: var(--text);
       font-feature-settings: "tnum";
     }}
     .metric-badge {{
       font-size: 11px;
-      padding: 2px 7px;
-      border-radius: 12px;
-      font-weight: 600;
+      padding: 3px 9px;
+      border-radius: 999px;
+      font-weight: 700;
     }}
     .badge-blue {{ background: #eff6ff; color: #1d4ed8; }}
     .badge-cyan {{ background: #ecfeff; color: #0e7490; }}
@@ -2232,72 +2281,99 @@ def dashboard_html():
 
     <!-- Executive Audit Counters Grid -->
     <div class="metrics-grid">
-      <div class="metric-card" data-cat="all" onclick="quickFilter('all')" title="Total tasks recorded in queue">
-        <div class="metric-label">Total Tasks</div>
+      <div class="metric-card mc-blue" data-cat="all" onclick="quickFilter('all')" title="Total tasks recorded in queue">
+        <div class="metric-top">
+          <div class="metric-label">Total Tasks</div>
+          <div class="metric-ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><circle cx="4" cy="6" r="1"/><circle cx="4" cy="12" r="1"/><circle cx="4" cy="18" r="1"/></svg></div>
+        </div>
         <div class="metric-value-row">
           <div class="metric-number" id="metric-total">{total_tickets}</div>
           <span class="metric-badge badge-blue">All</span>
         </div>
       </div>
 
-      <div class="metric-card" data-cat="assigned" onclick="quickFilter('assigned')" title="Newly assigned tasks">
-        <div class="metric-label">Assigned Tasks</div>
+      <div class="metric-card mc-cyan" data-cat="assigned" onclick="quickFilter('assigned')" title="Newly assigned tasks">
+        <div class="metric-top">
+          <div class="metric-label">Assigned Tasks</div>
+          <div class="metric-ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg></div>
+        </div>
         <div class="metric-value-row">
           <div class="metric-number" id="metric-assigned">{assigned_count}</div>
           <span class="metric-badge badge-cyan">New</span>
         </div>
       </div>
 
-      <div class="metric-card" data-cat="reassigned" onclick="quickFilter('reassigned')" title="Tasks reassigned to a new technician">
-        <div class="metric-label">Reassigned Tasks</div>
+      <div class="metric-card mc-purple" data-cat="reassigned" onclick="quickFilter('reassigned')" title="Tasks reassigned to a new technician">
+        <div class="metric-top">
+          <div class="metric-label">Reassigned Tasks</div>
+          <div class="metric-ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="17 1 21 5 17 9"/><path d="M3 11V9a4 4 0 0 1 4-4h14"/><polyline points="7 23 3 19 7 15"/><path d="M21 13v2a4 4 0 0 1-4 4H3"/></svg></div>
+        </div>
         <div class="metric-value-row">
           <div class="metric-number" id="metric-reassigned">{reassigned_count}</div>
           <span class="metric-badge badge-purple">Reassigned</span>
         </div>
       </div>
 
-      <div class="metric-card" data-cat="pending" onclick="quickFilter('pending')" title="Active dialing or awaiting response">
-        <div class="metric-label">Pending / In-Call</div>
+      <div class="metric-card mc-amber" data-cat="pending" onclick="quickFilter('pending')" title="Active dialing or awaiting response">
+        <div class="metric-top">
+          <div class="metric-label">Pending / In-Call</div>
+          <div class="metric-ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6A19.79 19.79 0 0 1 2.12 4.18 2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72c.13.96.36 1.9.7 2.81a2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45c.91.34 1.85.57 2.81.7A2 2 0 0 1 22 16.92z"/></svg></div>
+        </div>
         <div class="metric-value-row">
           <div class="metric-number" id="metric-pending">{pending_count}</div>
           <span class="metric-badge badge-amber">Dialing</span>
         </div>
       </div>
 
-      <div class="metric-card" data-cat="escalated" onclick="quickFilter('escalated')" title="Escalated tasks to Team Leader or Manager">
-        <div class="metric-label">Escalated Tasks</div>
+      <div class="metric-card mc-red" data-cat="escalated" onclick="quickFilter('escalated')" title="Escalated tasks to Team Leader or Manager">
+        <div class="metric-top">
+          <div class="metric-label">Escalated Tasks</div>
+          <div class="metric-ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="19" x2="12" y2="5"/><polyline points="5 12 12 5 19 12"/></svg></div>
+        </div>
         <div class="metric-value-row">
           <div class="metric-number" id="metric-escalated">{escalated_count}</div>
           <span class="metric-badge badge-red">Tier 1 & 2</span>
         </div>
       </div>
 
-      <div class="metric-card" data-cat="ack" onclick="quickFilter('ack')" title="Calls accepted and acknowledged">
-        <div class="metric-label">Acknowledged</div>
+      <div class="metric-card mc-green" data-cat="ack" onclick="quickFilter('ack')" title="Calls accepted and acknowledged">
+        <div class="metric-top">
+          <div class="metric-label">Acknowledged</div>
+          <div class="metric-ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg></div>
+        </div>
         <div class="metric-value-row">
           <div class="metric-number" id="metric-ack">{ack_count}</div>
           <span class="metric-badge badge-green">{ack_rate} Rate</span>
         </div>
       </div>
 
-      <div class="metric-card" data-cat="unresolved" onclick="quickFilter('unresolved')" title="Escalated tasks currently pending resolution">
-        <div class="metric-label">Unresolved Escalations</div>
+      <div class="metric-card mc-red" data-cat="unresolved" onclick="quickFilter('unresolved')" title="Escalated tasks currently pending resolution">
+        <div class="metric-top">
+          <div class="metric-label">Unresolved Escalations</div>
+          <div class="metric-ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg></div>
+        </div>
         <div class="metric-value-row">
           <div class="metric-number" id="metric-unresolved">{unresolved_count}</div>
           <span class="metric-badge badge-red">Open Attention</span>
         </div>
       </div>
 
-      <div class="metric-card" onclick="filterBySms('delivered')" title="WhatsApp Template Alerts Sent / Delivered (click to show delivered SMS tasks)">
-        <div class="metric-label">SMS Dispatched</div>
+      <div class="metric-card mc-purple" onclick="filterBySms('delivered')" title="WhatsApp Template Alerts Sent / Delivered (click to show delivered SMS tasks)">
+        <div class="metric-top">
+          <div class="metric-label">SMS Dispatched</div>
+          <div class="metric-ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg></div>
+        </div>
         <div class="metric-value-row">
           <div class="metric-number" id="metric-wa-total">{wa_total}</div>
           <span class="metric-badge badge-purple">{wa_delivered} Deliv</span>
         </div>
       </div>
 
-      <div class="metric-card" title="Technical Failures or Call Exceptions">
-        <div class="metric-label">Technical Exceptions</div>
+      <div class="metric-card mc-slate" title="Technical Failures or Call Exceptions">
+        <div class="metric-top">
+          <div class="metric-label">Technical Exceptions</div>
+          <div class="metric-ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg></div>
+        </div>
         <div class="metric-value-row">
           <div class="metric-number" id="metric-calls-failed">{calls_failed}</div>
           <span class="metric-badge badge-slate">Failed Calls</span>
