@@ -675,7 +675,7 @@ def send_sms_alert(t, role, rec, call_cid=None, alert_type_override=None, custom
         if CFG.get("whatsapp_enabled"):
             try:
                 _send_whatsapp_copy(t, role, rec, display_name, w_id, alert_type, is_emergency, reason,
-                                    tech_name, attempt_no, site_name, reject_reason_text)
+                                    tech_name, attempt_no, site_name, reject_reason_text, desc)
             except Exception as ex:  # noqa: BLE001
                 print(f"[whatsapp] unexpected error for {display_name}: {ex}", flush=True)
 
@@ -686,17 +686,17 @@ def send_sms_alert(t, role, rec, call_cid=None, alert_type_override=None, custom
 
 
 def _send_whatsapp_copy(t, role, rec, display_name, w_id, alert_type, is_emergency, reason,
-                        tech_name, attempt_no, site_name, reject_reason_text):
-    """Send the escalation alert on WhatsApp too (360dialog template) and log it as its own row.
-    Only the no-answer and rejection templates exist; emergency alerts are skipped until their
-    templates are approved."""
+                        tech_name, attempt_no, site_name, reject_reason_text, desc=None):
+    """Send the escalation alert on WhatsApp too (360dialog template) and log it as its own row."""
     tid = t["ticket_id"]
-    role_title = role.replace("_", " ").title()
     if is_emergency:
-        audit(tid, "whatsapp_skipped",
-              f"No approved WhatsApp template for emergency alerts yet ({role_title}: {display_name})")
-        return
-    if reason == "rejected":
+        # Emergency template shabakkat_emergency_opening1; its last parameter is the status text.
+        status = "Escalated" if "Escalation" in alert_type else "New"
+        template = "shabakkat_emergency_opening1"
+        send = lambda: ae_whatsapp.send_emergency_opening_alert(  # noqa: E731
+            rec["mobile"], tid, site_name, t.get("severity") or "Emergency", desc or t.get("description") or "-",
+            tech_name, status)
+    elif reason == "rejected":
         template = "shabakkat_explicitrejection"
         send = lambda: ae_whatsapp.send_explicit_rejection_alert(  # noqa: E731
             rec["mobile"], tid, site_name, tech_name, reject_reason_text, attempt_no)
@@ -704,7 +704,13 @@ def _send_whatsapp_copy(t, role, rec, display_name, w_id, alert_type, is_emergen
         template = "shabakkat_noanswer"
         send = lambda: ae_whatsapp.send_no_answer_alert(  # noqa: E731
             rec["mobile"], tid, site_name, tech_name, attempt_no)
+    _wa_deliver(t, role, rec, display_name, w_id, f"{alert_type} WhatsApp Alert", template, send)
 
+
+def _wa_deliver(t, role, rec, display_name, w_id, msg_type, template, send):
+    """Run one WhatsApp send, audit it and save it as a row with channel 'whatsapp'."""
+    tid = t["ticket_id"]
+    role_title = role.replace("_", " ").title()
     submitted_time = now_iso()
     deliv_status, fail_reason, msg_id = "failed", None, None
     try:
@@ -721,7 +727,6 @@ def _send_whatsapp_copy(t, role, rec, display_name, w_id, alert_type, is_emergen
         print(f"[whatsapp] Failed to send to {display_name} ({rec['mobile']}): {ex}", flush=True)
         audit(tid, "whatsapp_error", f"Could not send WhatsApp to {role_title} ({display_name}): {ex}")
 
-    msg_type = f"{alert_type} WhatsApp Alert"
     record_whatsapp_message(
         workflow_id=w_id, ticket_id=tid, assignment_id=t.get("assignment_id"), recipient_role=role,
         recipient_id=rec.get("id") or "", recipient_name=rec.get("name") or display_name,
@@ -777,6 +782,15 @@ def send_sms_closure(t, role, rec, resolution=None, closed_at=None, delay_sec=No
         except Exception as ex:  # noqa: BLE001
             print(f"[sms] Failed to send closure SMS to {display_name} ({rec['mobile']}): {ex}", flush=True)
             audit(tid, "sms_error", f"Could not send closure SMS to {role_title} ({display_name}): {ex}")
+
+        if CFG.get("whatsapp_enabled"):
+            try:
+                _wa_deliver(
+                    t, role, rec, display_name, f"WF-{tid}-{t.get('assignment_id') or 'A1'}",
+                    "Emergency Closure WhatsApp Alert", "shabakkat_emergency_closure1",
+                    lambda: ae_whatsapp.send_emergency_closure_alert(rec["mobile"], tid, site_disp, close_time, res))
+            except Exception as ex:  # noqa: BLE001
+                print(f"[whatsapp] unexpected closure error for {display_name}: {ex}", flush=True)
 
     threading.Thread(
         target=_do_send,

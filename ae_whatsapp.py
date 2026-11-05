@@ -97,6 +97,51 @@ def send_explicit_rejection_alert(phone_number, ticket_id, site, tech_name, reas
     return send_whatsapp_template(phone_number, "shabakkat_explicitrejection", params)
 
 
+def _format_datetime(dt_str=None):
+    try:
+        if dt_str:
+            d = datetime.fromisoformat(str(dt_str).replace("Z", "+00:00"))
+            return d.strftime("%d-%b-%Y %I:%M %p")
+    except Exception:
+        pass
+    return datetime.now().strftime("%d-%b-%Y %I:%M %p")
+
+
+def _clean(value):
+    """Template parameters cannot contain line breaks or tabs."""
+    return " ".join(str(value if value is not None else "-").split()) or "-"
+
+
+def send_emergency_opening_alert(phone_number, ticket_id, site, severity, issue, tech_name,
+                                 status="New", date_str=None):
+    """
+    Template: shabakkat_emergency_opening1 (7 parameters):
+    1: ticket_id
+    2: site
+    3: severity
+    4: issue / description
+    5: date and time (e.g. 01-Nov-2026 5:00 PM)
+    6: technician name
+    7: status ("New" for a new emergency, "Escalated" when it is escalated)
+    """
+    params = [_clean(ticket_id), _clean(site), _clean(severity), _clean(issue),
+              _format_datetime(date_str), _clean(tech_name), _clean(status)]
+    return send_whatsapp_template(phone_number, "shabakkat_emergency_opening1", params)
+
+
+def send_emergency_closure_alert(phone_number, ticket_id, site, closed_at, resolution, status="Resolved"):
+    """
+    Template: shabakkat_emergency_closure1 (5 parameters):
+    1: ticket_id
+    2: site
+    3: closure date and time (e.g. 01-Nov-2026 5:00 PM)
+    4: status ("Resolved")
+    5: resolution text
+    """
+    params = [_clean(ticket_id), _clean(site), _format_datetime(closed_at), _clean(status), _clean(resolution)]
+    return send_whatsapp_template(phone_number, "shabakkat_emergency_closure1", params)
+
+
 # Backwards compatibility fallback if free text is invoked
 def send_whatsapp(phone_number, message, timeout=15):
     """Fallback text sender."""
