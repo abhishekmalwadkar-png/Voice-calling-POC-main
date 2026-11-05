@@ -2465,6 +2465,8 @@ def handle_update_records(payload):
                 }
 
             new_aid = f"{tid}-ASN{int(time.time()*1000)%10000}"
+            # Pass the same assignment id to the PostgreSQL save so the dashboard and the call workflow agree.
+            item["assignment_id"] = new_aid
             update_fields = {
                 "assignment_id": new_aid,
                 "uc1_assignment_id": new_aid,

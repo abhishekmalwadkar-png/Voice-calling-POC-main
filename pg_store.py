@@ -650,6 +650,40 @@ def save_updated_records(items):
 
                     new_aid = str(item.get("assignment_id") or f"{tid}-ASN{int(datetime.now().timestamp()*1000)%10000}").strip()
 
+                    # Team leader / manager: use the ones sent with the update, else keep the previous assignment's.
+                    def _contact(prefix, *aliases):
+                        mobile = ""
+                        for key in (f"{prefix}_mobile", *[f"{a}_mobile" for a in aliases]):
+                            if item.get(key):
+                                mobile = str(item.get(key)).strip()
+                                break
+                        if not mobile:
+                            return None
+                        name = ""
+                        for key in (f"{prefix}_name", *[f"{a}_name" for a in aliases]):
+                            if item.get(key):
+                                name = str(item.get(key)).strip()
+                                break
+                        lang = ""
+                        for key in (f"{prefix}_preferred_lang", f"{prefix}_language",
+                                    *[f"{a}_preferred_lang" for a in aliases]):
+                            if item.get(key):
+                                lang = str(item.get(key)).strip()
+                                break
+                        return {"name": name, "mobile": mobile, "preferred_language": lang or "English"}
+
+                    tl_dict = _contact("teamleader", "team_leader")
+                    mgr_dict = _contact("manager")
+                    if current_aid and (tl_dict is None or mgr_dict is None):
+                        cur.execute("SELECT team_leader_details, manager_details FROM public.tb_assignments "
+                                    "WHERE assignment_id = %s", (current_aid,))
+                        prev_row = cur.fetchone()
+                        if prev_row:
+                            if tl_dict is None:
+                                tl_dict = prev_row[0]
+                            if mgr_dict is None:
+                                mgr_dict = prev_row[1]
+
                     if current_aid:
                         cur.execute("""
                             UPDATE public.tb_assignments
@@ -661,15 +695,20 @@ def save_updated_records(items):
                         INSERT INTO public.tb_assignments (
                             assignment_id, ticket_id, previous_assignment_id,
                             technician_name, technician_mobile, preferred_language,
+                            team_leader_details, manager_details,
                             assignment_type, assignment_status, assigned_at
-                        ) VALUES (%s, %s, %s, %s, %s, %s, 'REASSIGNMENT', %s, now())
+                        ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, 'REASSIGNMENT', %s, now())
                         ON CONFLICT (assignment_id) DO UPDATE SET
                             technician_name = EXCLUDED.technician_name,
                             technician_mobile = EXCLUDED.technician_mobile,
                             preferred_language = EXCLUDED.preferred_language,
+                            team_leader_details = EXCLUDED.team_leader_details,
+                            manager_details = EXCLUDED.manager_details,
                             assignment_status = EXCLUDED.assignment_status,
                             assigned_at = EXCLUDED.assigned_at;
-                    """, (new_aid, tid, current_aid, tech_name, tech_mob, tech_lang, task_status or "Assigned"))
+                    """, (new_aid, tid, current_aid, tech_name, tech_mob, tech_lang,
+                          Json(tl_dict) if tl_dict else None, Json(mgr_dict) if mgr_dict else None,
+                          task_status or "Assigned"))
 
                     upd_fields = ["current_assignment_id = %s", "updated_at = now()"]
                     upd_args = [new_aid]
